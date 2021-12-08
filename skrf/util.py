@@ -64,6 +64,7 @@ from subprocess import Popen, PIPE
 import sys
 from functools import wraps
 from .constants import Number, NumberLike
+import h5py as hdf
 
 def now_string() -> str:
     """
@@ -824,3 +825,31 @@ def suppress_warning_decorator(msg):
                 warnings.warn(w.message.args[0])
         return suppressed_func
     return suppress_warnings_decorated
+
+
+def write_to_hdf(data_list, key_list, fname):
+    """
+    Writes a list of arrays to data sets with names in key_list to an hdf5 at
+    the path given by fname
+
+    Parameters:
+    ----------
+
+    data_list:      list of arrays to write to data sets
+    key_list:       list of string keys for each data set in data_list in the
+                    same order as data_list
+    fname:          path to the hdf5 file output
+
+    """
+
+    # Open the new hdf5 file and get the file handle
+    fid = hdf.File(fname, 'w')
+
+    # Iterate over the data_list and key_list
+    for d, k in zip(data_list, key_list):
+        # print('{}: {}'.format(k, d))
+        d = npy.asarray(d)
+        fid.create_dataset(k, data=d)
+
+    # Close the file handle
+    fid.close()
