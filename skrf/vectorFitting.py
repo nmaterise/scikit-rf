@@ -9,10 +9,17 @@ if TYPE_CHECKING:
 from functools import wraps
 try:
     from . import plotting    # will perform the correct setup for matplotlib before it is called below
+except ImportError as ex:
+    print(f'Failed to import plotting\n{ex}')
+try:
     import matplotlib.pyplot as mplt
+except ImportError as ex:
+    print(f'Failed to import matplotlib\n{ex}')
+try:
     from matplotlib.ticker import EngFormatter
-except ImportError:
-    mplt = None
+except ImportError as ex:
+    print(f'Failed to import EngFormatter\n{ex}')
+    # mplt = None
 
 import logging
 import warnings
@@ -32,7 +39,10 @@ def check_plotting(func):
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        if mplt is None:
+        try:
+            import matplotlib.pyplot as mplt
+        except ImportError as ex:
+            print(f'ImportError:\n{ex}')
             raise RuntimeError('Plotting is not available')
         func(*args, **kwargs)
 
@@ -210,7 +220,7 @@ class VectorFitting:
         i_offset = len(pole_freqs_real)
         for i, f in enumerate(pole_freqs_cmplx):
             omega = 2 * np.pi * f
-            poles_re[i_offset + i] = -1 / 100 * omega
+            poles_re[i_offset + i] = -1. / 100. * omega
             poles_im[i_offset + i] = omega
 
         # save initial poles (un-normalize first)
@@ -807,12 +817,13 @@ class VectorFitting:
         return A, B, C, D, E
 
     @staticmethod
-    def _get_s_from_ABCDE(freq: float,
-                          A: np.ndarray, B: np.ndarray, C: np.ndarray, D: np.ndarray, E: np.ndarray) -> np.ndarray:
+    def _get_s_from_ABCDE(freq: float, A: np.ndarray, B: np.ndarray, C:
+            np.ndarray, D: np.ndarray, E: np.ndarray) -> np.ndarray:
         """
         Private method.
-        Returns the S-matrix of the vector fitted model calculated from the real-valued system matrices of the state-
-        space representation, as provided by `_get_ABCDE()`.
+        Returns the S-matrix of the vector fitted model calculated from the
+        real-valued system matrices of the state- space representation, as
+        provided by `_get_ABCDE()`.
 
         Parameters
         ----------
@@ -850,8 +861,9 @@ class VectorFitting:
 
         Raises
         ------
-        NotImplementedError
-            If the function is called for `parameter_type` different than `S` (scattering).
+        KeyError
+            If the function is called for `parameter_type` different than `S`,
+            `Y` or `Z`.
 
         ValueError
             If the function is used with a model containing nonzero proportional coefficients.
@@ -873,12 +885,35 @@ class VectorFitting:
             Test Matrix," in IEEE Transactions on Microwave Theory and Techniques, vol. 56, no. 12, pp. 2701-2708,
             Dec. 2008, DOI: 10.1109/TMTT.2008.2007319.
         """
+        # get state-space matrices
+        A, B, C, D, E = self._get_ABCDE()
+        n_ports = np.shape(D)[0]
 
-        if parameter_type.lower() != 's':
-            raise NotImplementedError('Passivity testing is currently only supported for scattering (S) parameters.')
-        if parameter_type.lower() == 's' and len(np.flatnonzero(self.proportional_coeff)) > 0:
-            raise ValueError('Passivity testing of scattering parameters with nonzero proportional coefficients does '
-                             'not make any sense; you need to run vector_fit() with option `fit_proportional=False` '
+        # Branch on the scattering or hybrid approaches to passivity testing
+        ## Scattering matrix representation
+        if parameter_type.lower() == 's':
+            # build half-size test matrix P from state-space matrices A, B, C, D
+            inv_neg = np.linalg.inv(D - np.identity(n_ports))
+            inv_pos = np.linalg.inv(D + np.identity(n_ports))
+            prod_neg = np.matmul(np.matmul(B, inv_neg), C)
+            prod_pos = np.matmul(np.matmul(B, inv_pos), C)
+            P = np.matmul(A - prod_neg, A - prod_pos)
+
+        ## Hybrid (Y or Z) matrix representations
+        elif (parameter_type.lower() == 'z') or (parameter_type.lower() == 'y'):
+            # build half-size test matrix P from state-space matrices A, B, C, D
+            inv_D = np.linalg.inv(-2.0 * D)
+            prod_D = 2.0 * np.matmul(np.matmul(B, inv_D), C)
+            P = np.matmul(A, A) + np.matmul(prod_D, A)
+
+        else:
+            raise KeyError(f'Unrecognized parameter_type ({parameter_type}).')
+        if (parameter_type.lower() == 's') \
+                and (len(np.flatnonzero(self.proportional_coeff)) > 0):
+            raise ValueError('Passivity testing of scattering parameters with'
+                             'nonzero proportional coefficients does '
+                             'not make any sense; you need to run vector_fit()'
+                             ' with option `fit_proportional=False` '
                              'first.')
 
         # # the network needs to be reciprocal for this passivity test method to work: S = transpose(S)
@@ -889,21 +924,11 @@ class VectorFitting:
         #                   'The model needs to be reciprocal.')
         #     return
 
-        # get state-space matrices
-        A, B, C, D, E = self._get_ABCDE()
-        n_ports = np.shape(D)[0]
-
-        # build half-size test matrix P from state-space matrices A, B, C, D
-        inv_neg = np.linalg.inv(D - np.identity(n_ports))
-        inv_pos = np.linalg.inv(D + np.identity(n_ports))
-        prod_neg = np.matmul(np.matmul(B, inv_neg), C)
-        prod_pos = np.matmul(np.matmul(B, inv_pos), C)
-        P = np.matmul(A - prod_neg, A - prod_pos)
-
         # extract eigenvalues of P
         P_eigs = np.linalg.eigvals(P)
 
-        # purely imaginary square roots of eigenvalues identify frequencies (2*pi*f) of borders of passivity violations
+        # purely imaginary square roots of eigenvalues identify frequencies
+        # (2*pi*f) of borders of passivity violations
         freqs_violation = []
         for sqrt_eigenval in np.sqrt(P_eigs):
             if np.real(sqrt_eigenval) == 0.0:
@@ -914,7 +939,8 @@ class VectorFitting:
 
         # identify frequency bands of passivity violations
 
-        # sweep the bands between crossover frequencies and identify bands of passivity violations
+        # sweep the bands between crossover frequencies and identify bands of
+        # passivity violations
         violation_bands = []
         for i, freq in enumerate(freqs_violation):
             if i == 0:
@@ -924,8 +950,14 @@ class VectorFitting:
                 f_start = freqs_violation[i - 1]
                 f_stop = freq
 
-            # calculate singular values at the center frequency between crossover frequencies to identify violations
+            # calculate singular values at the center frequency between
+            # crossover frequencies to identify violations
             f_center = 0.5 * (f_start + f_stop)
+
+            # This should work for S, Y, Z -- same form for the state-space
+            # matrix conversion to any of the other matrices, provided the poles
+            # and residues used to generate ABCDE have been derived from the
+            # appropriate matrix representation
             s_center = self._get_s_from_ABCDE(f_center, A, B, C, D, E)
             u, sigma, vh = np.linalg.svd(s_center)
             passive = True
@@ -1011,11 +1043,15 @@ class VectorFitting:
         """
 
         if parameter_type.lower() != 's':
-            raise NotImplementedError('Passivity testing is currently only supported for scattering (S) parameters.')
-        if parameter_type.lower() == 's' and len(np.flatnonzero(self.proportional_coeff)) > 0:
-            raise ValueError('Passivity testing of scattering parameters with nonzero proportional coefficients does '
-                             'not make any sense; you need to run vector_fit() with option `fit_proportional=False` '
-                             'first.')
+            is_hybrid = False
+        else:
+            is_hybrid = True
+        if (parameter_type.lower() == 's') \
+                and (len(np.flatnonzero(self.proportional_coeff)) > 0):
+            raise ValueError('Passivity testing of scattering parameters with '
+                             'nonzero proportional coefficients does '
+                             'not make any sense; you need to run vector_fit()'
+                             ' with option `fit_proportional=False` first.')
 
         # always run passivity test first; this will write 'self.violation_bands'
         violation_bands = self.passivity_test()
@@ -1047,11 +1083,22 @@ class VectorFitting:
                 s_eval = self._get_s_from_ABCDE(freq_eval, A, B, C_t, D, E)
 
                 # singular value decomposition
-                u, sigma, vh = np.linalg.svd(s_eval)
+                if is_hybrid:
+                    sigma, u = np.linalg.eig(s_eval.T.conj() + s_eval)
+                    vh = np.linalg.inv(u)
+                    # keep track of the smallest eigenvalue in every
+                    # iteration step
+                    if np.amin(sigma) > sigma_max:
+                        sigma_max = np.amin(sigma)
+                    sign = 1.0
+                else:
+                    u, sigma, vh = np.linalg.svd(s_eval)
 
-                # keep track of the greatest singular value in every iteration step
-                if np.amax(sigma) > sigma_max:
-                    sigma_max = np.amax(sigma)
+                    # keep track of the greatest singular value in every
+                    # iteration step
+                    if np.amax(sigma) > sigma_max:
+                        sigma_max = np.amax(sigma)
+                    sign = -1.0
 
                 # prepare and fill the square matrices 'gamma' and 'psi' marking passivity violations
                 gamma = np.diag(sigma)
@@ -1091,7 +1138,7 @@ class VectorFitting:
             C_viol = np.transpose(x)
 
             # calculate and update C_t for next iteration
-            C_t = C_t - C_viol
+            C_t = C_t + sign * C_viol
             t += 1
             self.history_max_sigma.append(sigma_max)
 
@@ -1302,13 +1349,18 @@ class VectorFitting:
         """
 
         if freqs is None:
-            freqs = np.linspace(np.amin(self.network.f), np.amax(self.network.f), 1000)
+            freqs = np.linspace(np.amin(self.network.f),
+                    np.amax(self.network.f), 1000)
 
         if ax is None:
+            import matplotlib.pyplot as mplt
             ax = mplt.gca()
 
-        ax.scatter(self.network.f, 20 * np.log10(np.abs(self.network.s[:, i, j])), color='r', label='Samples')
-        ax.plot(freqs, 20 * np.log10(np.abs(self.get_model_response(i, j, freqs))), color='k', label='Fit')
+        ax.scatter(self.network.f, 
+                20 * np.log10(np.abs(self.network.s[:, i, j])), color='r',
+                label='Samples')
+        ax.plot(freqs, 20 * np.log10(np.abs(self.get_model_response(i, j,
+            freqs))), color='k', label='Fit')
         ax.set_xlabel('Frequency (Hz)')
         ax.set_ylabel('Magnitude (dB)')
         ax.legend(loc='best')
@@ -1346,10 +1398,22 @@ class VectorFitting:
             freqs = np.linspace(np.amin(self.network.f), np.amax(self.network.f), 1000)
 
         if ax is None:
+            import matplotlib.pyplot as mplt
             ax = mplt.gca()
 
-        ax.scatter(self.network.f, np.abs(self.network.s[:, i, j]), color='r', label='Samples')
-        ax.plot(freqs, np.abs(self.get_model_response(i, j, freqs)), color='k', label='Fit')
+        # Check the size of the frequency array and decimate down to 1000 points
+        if len(self.network.f) > 1000:
+            dfac = len(self.network.f) // 1000
+            f = self.network.f[0::dfac]
+            freqs = freqs[0::dfac]
+        else:
+            f = self.network.f
+            dfac = 1
+
+        ax.scatter(f, np.abs(self.network.s[0::dfac, i, j]), color='r',
+                label='Samples')
+        ax.plot(freqs, np.abs(self.get_model_response(i, j, freqs)), color='k',
+                label='Fit')
         ax.set_xlabel('Frequency (Hz)')
         ax.set_ylabel('Magnitude')
         ax.legend(loc='best')
@@ -1439,9 +1503,11 @@ class VectorFitting:
         return ax
 
     @check_plotting
-    def plot_s_re(self, i : int, j: int, freqs: Any = None, ax: mplt.Axes = None) -> mplt.Axes:
+    def plot_z_db(self, i: int, j: int, freqs: Any = None,
+                  ax: mplt.Axes = None) -> mplt.Axes:
         """
-        Plots the real part of the scattering parameter response :math:`S_{i+1,j+1}` in the fit.
+        Plots the magnitude in dB of the impedance matrix response
+        :math:`Z_{i+1,j+1}` in the fit.
 
         Parameters
         ----------
@@ -1452,37 +1518,37 @@ class VectorFitting:
             Column index of the response.
 
         freqs : list of float or ndarray or None, optional
-            List of frequencies for the response plot. If None, the sample frequencies of the fitted network in
-            :attr:`network` are used.
+            List of frequencies for the response plot. If None, the sample
+            frequencies of the fitted network in :attr:`network` are used.
 
         ax : :class:`matplotlib.Axes` object or None
-            matplotlib axes to draw on. If None, the current axes is fetched with :func:`gca()`.
+            matplotlib axes to draw on. If None, the current axes is fetched
+            with :func:`gca()`.
 
         Returns
         -------
         :class:`matplotlib.Axes`
-            matplotlib axes used for drawing. Either the passed :attr:`ax` argument or the one fetch from the current
-            figure.
+            matplotlib axes used for drawing. Either the passed :attr:`ax`
+            argument or the one fetch from the current figure.
         """
 
-        if freqs is None:
-            freqs = np.linspace(np.amin(self.network.f), np.amax(self.network.f), 1000)
-
         if ax is None:
+            import matplotlib.pyplot as mplt
             ax = mplt.gca()
 
-        ax.scatter(self.network.f, np.real(self.network.s[:, i, j]), color='r', label='Samples')
-        ax.plot(freqs, np.real(self.get_model_response(i, j, freqs)), color='k', label='Fit')
-        ax.set_xlabel('Frequency (Hz)')
-        ax.set_ylabel('Real Part')
-        ax.legend(loc='best')
-        ax.set_title('Response i={}, j={}'.format(i, j))
+        ax.plot(self.network.f, 
+                20 * np.log10(np.abs(self.network.z[:, i, j])), 'r-',
+                label='Samples')
+        ax.plot(freqs, 20 * np.log10(np.abs(self.get_model_response(i, j,
+            freqs))), 'k--', label='Fit')
         return ax
 
     @check_plotting
-    def plot_s_im(self, i : int, j: int, freqs: Any = None, ax: mplt.Axes = None) -> mplt.Axes:
+    def plot_z_re(self, i : int, j: int, freqs: Any = None,
+                  ax: mplt.Axes = None) -> mplt.Axes:
         """
-        Plots the imaginary part of the scattering parameter response :math:`S_{i+1,j+1}` in the fit.
+        Plots the real part of the impedance matrix response :math:`Z_{i+1,j+1}`
+        in the fit.
 
         Parameters
         ----------
@@ -1493,31 +1559,82 @@ class VectorFitting:
             Column index of the response.
 
         freqs : list of float or ndarray or None, optional
-            List of frequencies for the response plot. If None, the sample frequencies of the fitted network in
-            :attr:`network` are used.
+            List of frequencies for the response plot. If None, the sample
+            frequencies of the fitted network in :attr:`network` are used.
 
         ax : :class:`matplotlib.Axes` object or None
-            matplotlib axes to draw on. If None, the current axes is fetched with :func:`gca()`.
+            matplotlib axes to draw on. If None, the current axes is fetched
+            with :func:`gca()`.
 
         Returns
         -------
         :class:`matplotlib.Axes`
-            matplotlib axes used for drawing. Either the passed :attr:`ax` argument or the one fetch from the current
-            figure.
+            matplotlib axes used for drawing. Either the passed :attr:`ax`
+            argument or the one fetch from the current figure.
         """
 
-        if freqs is None:
-            freqs = np.linspace(np.amin(self.network.f), np.amax(self.network.f), 1000)
+        # if freqs is None:
+        #     freqs = np.linspace(np.amin(self.network.f),
+        #             np.amax(self.network.f), 1000)
 
         if ax is None:
             ax = mplt.gca()
 
-        ax.scatter(self.network.f, np.imag(self.network.s[:, i, j]), color='r', label='Samples')
-        ax.plot(freqs, np.imag(self.get_model_response(i, j, freqs)), color='k', label='Fit')
-        ax.set_xlabel('Frequency (Hz)')
-        ax.set_ylabel('Imaginary Part')
-        ax.legend(loc='best')
-        ax.set_title('Response i={}, j={}'.format(i, j))
+        ax.plot(self.network.f, np.real(self.network.z[:, i, j]), 'r--',
+                label='Samples')
+        ax.plot(freqs, np.real(self.get_model_response(i, j, freqs)), 'k-',
+                label='Fit')
+        # ax.set_xlabel('Frequency (Hz)')
+        # ax.set_ylabel('Real Part')
+        # ax.legend(loc='best')
+        # ax.set_title('Response i={}, j={}'.format(i, j))
+        return ax
+
+    @check_plotting
+    def plot_z_im(self, i : int, j: int, freqs: Any = None,
+            ax: mplt.Axes = None) -> mplt.Axes:
+        """
+        Plots the imaginary part of the impedance matrix response
+        :math:`Z_{i+1,j+1}` in the fit.
+
+        Parameters
+        ----------
+        i : int
+            Row index of the response.
+
+        j : int
+            Column index of the response.
+
+        freqs : list of float or ndarray or None, optional
+            List of frequencies for the response plot. If None, the sample
+            frequencies of the fitted network in :attr:`network` are used.
+
+        ax : :class:`matplotlib.Axes` object or None
+            matplotlib axes to draw on. If None, the current axes is fetched
+            with :func:`gca()`.
+
+        Returns
+        -------
+        :class:`matplotlib.Axes`
+            matplotlib axes used for drawing. Either the passed :attr:`ax`
+            argument or the one fetch from the current figure.
+        """
+
+        # if freqs is None:
+        #     freqs = np.linspace(np.amin(self.network.f),
+        #     np.amax(self.network.f), 1000)
+
+        if ax is None:
+            ax = mplt.gca()
+
+        ax.plot(self.network.f, np.imag(self.network.z[:, i, j]), 'r--',
+                label='Samples')
+        ax.plot(freqs, np.imag(self.get_model_response(i, j, freqs)), 'k-',
+                label='Fit')
+        # ax.set_xlabel('Frequency (Hz)')
+        # ax.set_ylabel('Imaginary Part')
+        # ax.legend(loc='best')
+        # ax.set_title('Response i={}, j={}'.format(i, j))
         return ax
 
     @check_plotting
@@ -1564,6 +1681,78 @@ class VectorFitting:
         ax.set_xlabel('Frequency (Hz)')
         ax.set_ylabel('Magnitude')
         ax.legend(loc='best')
+        return ax
+
+    @check_plotting
+    def plot_zH_eigenvalues(self, freqs: Any = None, ax: mplt.Axes = None,
+            fname: str = None, fsize : float = 20.0) -> mplt.Axes:
+        """
+        Plots the eigenvalues of the vector fitted Hermitian part of Z-matrix in
+        linear scale.
+
+        Parameters
+        ----------
+        freqs : list of float or ndarray or None, optional
+            List of frequencies for the response plot. If None, the sample
+            frequencies of the fitted network in
+            :attr:`network` are used.
+
+        ax : :class:`matplotlib.Axes` object or None
+            matplotlib axes to draw on. If None, the current axes is fetched
+            with :func:`gca()`.
+        fname : path to write the figure to file
+        fsize : float specifying fontsize of the axes, legends, and numbers
+
+        Returns
+        -------
+        :class:`matplotlib.Axes`
+            matplotlib axes used for drawing. Either the passed :attr:`ax`
+            argument or the one fetch from the current figure.
+        """
+
+        # if freqs is None:
+        #     freqs = np.linspace(np.amin(self.network.f),
+        #             np.amax(self.network.f), 1000)
+
+        if (ax is None) and (fname is not None):
+            import matplotlib.pyplot as mplt
+            fig, ax = mplt.subplots(1, 1, tight_layout=True)
+        else:
+            ax = mplt.gca()
+            fig = None
+
+        # get system matrices of state-space representation
+        A, B, C, D, E = self._get_ABCDE()
+
+        n_ports = np.shape(D)[0]
+        evals   = np.zeros((n_ports, len(freqs)))
+
+        # calculate and save eigenvalues for each frequency
+        for i in range(len(freqs)):
+            Z           = self._get_s_from_ABCDE(freqs[i], A, B, C, D, E)
+            ev          = np.sort(np.real(
+                          np.linalg.eigvals((Z.T.conj() + Z)/2)))
+            evals[:, i] = ev
+
+        # plot the frequency response of each singular value
+        for n in range(n_ports):
+            ax.plot(freqs, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
+
+        # Set the axes fontsizes
+        for tick in ax.get_xticklabels():
+            tick.set_fontsize(fsize)
+        for tick in ax.get_yticklabels():
+            tick.set_fontsize(fsize)
+        ax.set_xlabel('Frequency (Hz)', fontsize=fsize)
+        ax.set_ylabel('Magnitude', fontsize=fsize)
+        hdls, lbls = ax.get_legend_handles_labels()
+        ax.legend(hdls, lbls, loc='best', fontsize=fsize)
+
+        # save the figure to file, if a path is not None
+        if (fname is not None) and (fig is not None):
+            fext = fname.split('.')[-1]
+            fig.savefig(fname, format=fext, transparent=True)
+
         return ax
 
     @check_plotting

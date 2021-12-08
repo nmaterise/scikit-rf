@@ -17,8 +17,12 @@ dist/
 *__pycache__/
 qtapps/sandbox*
 *.iml
+*.hdf5
 
 .vscode/
 .coverage
 .tox/
 .coverage*
+*.swp
+*tags*
+*pdf

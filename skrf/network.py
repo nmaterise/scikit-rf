@@ -1702,7 +1702,8 @@ class Network(object):
                 return False
         return True
 
-    def is_passive(self, tol: float = mf.ALMOST_ZERO) -> bool:
+    def is_passive(self, tol: float = mf.ALMOST_ZERO,
+            parameter_type: str = 's') -> bool:
         """
         Test for passivity
 
