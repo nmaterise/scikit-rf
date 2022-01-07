@@ -99,7 +99,7 @@ class Frequency(object):
 
 
     def __init__(self, start: float = 0, stop: float = 0, npoints: int = 0,
-        unit: str = 'ghz', sweep_type: str = 'lin') -> None:
+        unit: str = 'hz', sweep_type: str = 'lin') -> None:
         """
         Frequency initializer.
 
