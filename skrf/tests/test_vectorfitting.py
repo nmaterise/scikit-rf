@@ -5,10 +5,14 @@ import tempfile
 import os
 import warnings
 import matplotlib.pyplot as mplt
+# import pytest
 
+
+test_all = False
 
 class VectorFittingTestCase(unittest.TestCase):
 
+    #@pytest.mark.skipif(not test_all)
     def test_ringslot_with_proportional(self):
         # perform the fit
         nw = skrf.data.ring_slot
@@ -16,6 +20,7 @@ class VectorFittingTestCase(unittest.TestCase):
         vf.vector_fit(n_poles_real=2, n_poles_cmplx=0, fit_proportional=True, fit_constant=True)
         self.assertLess(vf.get_rms_error(), 0.02)
 
+    #@pytest.mark.skipif(not test_all)
     def test_ringslot_default_log(self):
         # perform the fit without proportional term
         nw = skrf.data.ring_slot
@@ -23,6 +28,7 @@ class VectorFittingTestCase(unittest.TestCase):
         vf.vector_fit(n_poles_real=4, n_poles_cmplx=0, init_pole_spacing='log')
         self.assertLess(vf.get_rms_error(), 0.01)
 
+    #@pytest.mark.skipif(not test_all)
     def test_ringslot_without_prop_const(self):
         # perform the fit without proportional term
         nw = skrf.data.ring_slot
@@ -30,6 +36,7 @@ class VectorFittingTestCase(unittest.TestCase):
         vf.vector_fit(n_poles_real=4, n_poles_cmplx=0, fit_proportional=False, fit_constant=False)
         self.assertLess(vf.get_rms_error(), 0.01)
 
+    #@pytest.mark.skipif(not test_all)
     def test_190ghz_measured(self):
         # perform the fit without proportional term
         nw = skrf.network.Network('./doc/source/examples/vectorfitting/190ghz_tx_measured.S2P')
@@ -37,6 +44,7 @@ class VectorFittingTestCase(unittest.TestCase):
         vf.vector_fit(n_poles_real=4, n_poles_cmplx=4, fit_proportional=False, fit_constant=True)
         self.assertLess(vf.get_rms_error(), 0.02)
 
+    #@pytest.mark.skipif(not test_all)
     def test_no_convergence(self):
         # perform a bad fit that does not converge and check if a RuntimeWarning is given
         with warnings.catch_warnings(record=True) as warning:
@@ -45,6 +53,7 @@ class VectorFittingTestCase(unittest.TestCase):
             vf.vector_fit(n_poles_real=0, n_poles_cmplx=5, fit_proportional=False, fit_constant=True)
             self.assertEqual(warning[-1].category, RuntimeWarning)
 
+    #@pytest.mark.skipif(not test_all)
     def test_spice_subcircuit(self):
         # fit ring slot example network
         nw = skrf.data.ring_slot
@@ -59,6 +68,7 @@ class VectorFittingTestCase(unittest.TestCase):
         n_lines = len(open(tmp_file.name, 'r').readlines())
         self.assertEqual(n_lines, 69)
 
+    #@pytest.mark.skipif(not test_all)
     def test_read_write_npz(self):
         # fit ring slot example network
         nw = skrf.data.ring_slot
@@ -79,12 +89,14 @@ class VectorFittingTestCase(unittest.TestCase):
         self.assertTrue(np.allclose(vf.proportional_coeff, vf2.proportional_coeff))
         self.assertTrue(np.allclose(vf.constant_coeff, vf2.constant_coeff))
 
+    #@pytest.mark.skipif(not test_all)
     def test_matplotlib_missing(self):
         vf = skrf.vectorFitting.VectorFitting(skrf.data.ring_slot)
         skrf.vectorFitting.mplt = None
         with self.assertRaises(RuntimeError):
             vf.plot_convergence()
 
+    #@pytest.mark.skipif(not test_all)
     def test_passivity_enforcement(self):
         vf = skrf.VectorFitting(None)
 
@@ -112,6 +124,7 @@ class VectorFittingTestCase(unittest.TestCase):
                                      [0.24516918+0.j, 1.88377719+2.57735204j]])
         self.assertTrue(np.allclose(vf.residues, passive_residues))
 
+    #@pytest.mark.skipif(not test_all)
     def test_passivity_enforcement_hybrid_saraswat(self):
         # Example obtained from the poles and residues in Table 1 of
         # [IEEE Tran. on Adv. Pkg. 27, 57 (2004)]
@@ -229,9 +242,10 @@ class VectorFittingTestCase(unittest.TestCase):
                     Zim = zdata[zidx + 1]
                     Z[:, i, j] = Zre + 1j * Zim
                 else:
+                    # Zmag = 10**(zdata[zidx] / 20.)
                     Zmag = zdata[zidx]
-                    Zph = zdata[zidx + 1]
-                    Z[:, i, j] = Zmag * np.exp(1j * Zph)
+                    Zph  = zdata[zidx + 1]
+                    Z[:, i, j] = Zmag * np.exp(1j * Zph * np.pi / 180.)
     
         # Create a network object to pass to VectorFit
         print(f'Constructing network from impedance data ...')
@@ -272,6 +286,12 @@ class VectorFittingTestCase(unittest.TestCase):
         for i in range(Nports):
             for j in range(Nports):
                 vf.plot_z_db(i, j, freqs=freqs, ax=ax[i, j])
+        fig.savefig('zmatrix_mag_db_mcdermott.pdf', format='pdf')
+        mplt.close('all')
+        fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
+        for i in range(Nports):
+            for j in range(Nports):
+                vf.plot_z_mag(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_mag_mcdermott.pdf', format='pdf')
         mplt.close('all')
         fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
@@ -303,7 +323,7 @@ class VectorFittingTestCase(unittest.TestCase):
         # any passivity violations that went undetected
         fname = 'zH_passive_mcdermott.pdf'
         print('Plotting passive eigenvalues of ZH ...')
-        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname)
+        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, ylim=[-0.5, 1.3])
 
         # plot the matrix values of the impedance
         # plot the real, imaginary components of the impedance
@@ -324,74 +344,75 @@ class VectorFittingTestCase(unittest.TestCase):
         # check if model is now passive
         self.assertTrue(vf.is_passive())
 
-    def test_vf_pole_count_hybrid_mcdermott(self, use_real_imag=False):
-        """
-        Tests VectorFit and its passivity correction algorithm on impedance
-        matrix data generated by HFSS
-        """
-        # Load the data from file and create a network from the impedance data
-        tld = './skrf/data'
-
-        fname1 = f'{tld}/nrm210802_McDermott_Qubit_loss1en5_Qubit1_zmatrix.tab'
-        fname2 = f'{tld}/nrm211212_McDermott_loss1en5_Qubit1_real_imag.tab'
-        fname = fname2 if use_real_imag else fname1
-
-        # Read the frequencies and impedances in a single shot
-        zdata = np.genfromtxt(fname, delimiter='\t', skip_header=2).T
-        freqs = zdata[0]
-        Nf = freqs.size
-        Nports = int(np.sqrt((len(zdata) - 1) // 2))
-
-        print(f'zdata.shape: {zdata.shape}')
-        print(f'Nports: {Nports}, Nf: {Nf}')
-        print(f'zdata.size: {zdata.size}')
-        print(f'freqs: {freqs}')
-    
-        # Initialize and populate the Z-matrix
-        print(f'Reading impedance data from {fname} ...')
-        Z = np.zeros([Nf, Nports, Nports], dtype=np.complex128)
-
-        for i in range(Nports):
-            for j in range(Nports):
-                zidx = 2 * (i * Nports + j) + 1
-                # Read real and imaginary data
-                if use_real_imag:
-                    Zre = zdata[zidx]
-                    Zim = zdata[zidx + 1]
-                    Z[:, i, j] = Zre + 1j * Zim
-                else:
-                    Zmag = zdata[zidx]
-                    Zph = zdata[zidx + 1]
-                    Z[:, i, j] = Zmag * np.exp(1j * Zph)
-    
-        # Create a network object to pass to VectorFit
-        print(f'Constructing network from impedance data ...')
-        nw       = skrf.Network.from_z(Z, f=freqs)
-        vf       = skrf.vectorFitting.VectorFitting(nw)
-        vf.freqs = freqs
-
-        # Set the number of poles on each iteration
-        Mp = np.linspace(0, 50, 51)
-        rms_errs = np.zeros(len(Mp))
-
-        # Iterate over increasing number of complex pole pairs
-        for i in range(len(Mp)):
-            print(f'Number of poles: {i+3} ...')
-            vf.vector_fit(n_poles_real=0, n_poles_cmplx=3+i,
-                          fit_proportional=True, fit_constant=True,
-                          parameter_type='z')
-            rms_errs[i] = np.max(vf.get_rms_error(i=list(range(Nports)), 
-                                j=list(range(Nports)), parameter_type='z'))
-
-        # Plot the results of the errors
-        fig, ax = mplt.subplots(1, 1, tight_layout=True)
-        ax.plot(Mp+3, rms_errs, ls='-', marker='o')
-        fsize = 20
-        ax.set_yscale('log')
-        ax.set_xlabel('No. of complex pole pairs', fontsize=fsize)
-        ax.set_ylabel('Max Element-wise RMS Error', fontsize=fsize)
-        fig.savefig('zmatrix_rms_errs_mcdermott.pdf', format='pdf')
-        mplt.close('all')
+    # #@pytest.mark.skipif(not test_all)
+    # def test_vf_pole_count_hybrid_mcdermott(self, use_real_imag=False):
+    #     """
+    #     Tests VectorFit and its passivity correction algorithm on impedance
+    #     matrix data generated by HFSS
+    #     """
+    #     # Load the data from file and create a network from the impedance data
+    #     tld = './skrf/data'
+    # 
+    #     fname1 = f'{tld}/nrm210802_McDermott_Qubit_loss1en5_Qubit1_zmatrix.tab'
+    #     fname2 = f'{tld}/nrm211212_McDermott_loss1en5_Qubit1_real_imag.tab'
+    #     fname = fname2 if use_real_imag else fname1
+    # 
+    #     # Read the frequencies and impedances in a single shot
+    #     zdata = np.genfromtxt(fname, delimiter='\t', skip_header=2).T
+    #     freqs = zdata[0]
+    #     Nf = freqs.size
+    #     Nports = int(np.sqrt((len(zdata) - 1) // 2))
+    # 
+    #     print(f'zdata.shape: {zdata.shape}')
+    #     print(f'Nports: {Nports}, Nf: {Nf}')
+    #     print(f'zdata.size: {zdata.size}')
+    #     print(f'freqs: {freqs}')
+    # 
+    #     # Initialize and populate the Z-matrix
+    #     print(f'Reading impedance data from {fname} ...')
+    #     Z = np.zeros([Nf, Nports, Nports], dtype=np.complex128)
+    # 
+    #     for i in range(Nports):
+    #         for j in range(Nports):
+    #             zidx = 2 * (i * Nports + j) + 1
+    #             # Read real and imaginary data
+    #             if use_real_imag:
+    #                 Zre = zdata[zidx]
+    #                 Zim = zdata[zidx + 1]
+    #                 Z[:, i, j] = Zre + 1j * Zim
+    #             else:
+    #                 Zmag = zdata[zidx]
+    #                 Zph = zdata[zidx + 1]
+    #                 Z[:, i, j] = Zmag * np.exp(1j * Zph)
+    # 
+    #     # Create a network object to pass to VectorFit
+    #     print(f'Constructing network from impedance data ...')
+    #     nw       = skrf.Network.from_z(Z, f=freqs)
+    #     vf       = skrf.vectorFitting.VectorFitting(nw)
+    #     vf.freqs = freqs
+    # 
+    #     # Set the number of poles on each iteration
+    #     Mp = np.linspace(0, 50, 51)
+    #     rms_errs = np.zeros(len(Mp))
+    # 
+    #     # Iterate over increasing number of complex pole pairs
+    #     for i in range(len(Mp)):
+    #         print(f'Number of poles: {i+3} ...')
+    #         vf.vector_fit(n_poles_real=0, n_poles_cmplx=3+i,
+    #                       fit_proportional=True, fit_constant=True,
+    #                       parameter_type='z')
+    #         rms_errs[i] = np.max(vf.get_rms_error(i=list(range(Nports)), 
+    #                             j=list(range(Nports)), parameter_type='z'))
+    # 
+    #     # Plot the results of the errors
+    #     fig, ax = mplt.subplots(1, 1, tight_layout=True)
+    #     ax.plot(Mp+3, rms_errs, ls='-', marker='o')
+    #     fsize = 20
+    #     ax.set_yscale('log')
+    #     ax.set_xlabel('No. of complex pole pairs', fontsize=fsize)
+    #     ax.set_ylabel('Max Element-wise RMS Error', fontsize=fsize)
+    #     fig.savefig('zmatrix_rms_errs_mcdermott.pdf', format='pdf')
+    #     mplt.close('all')
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(VectorFittingTestCase)

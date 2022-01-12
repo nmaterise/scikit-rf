@@ -1544,6 +1544,46 @@ class VectorFitting:
         return ax
 
     @check_plotting
+    def plot_z_mag(self, i: int, j: int, freqs: Any = None,
+                  ax: mplt.Axes = None) -> mplt.Axes:
+        """
+        Plots the magnitude in ohms (linear scale) of the impedance matrix
+        response :math:`Z_{i+1,j+1}` in the fit.
+
+        Parameters
+        ----------
+        i : int
+            Row index of the response.
+
+        j : int
+            Column index of the response.
+
+        freqs : list of float or ndarray or None, optional
+            List of frequencies for the response plot. If None, the sample
+            frequencies of the fitted network in :attr:`network` are used.
+
+        ax : :class:`matplotlib.Axes` object or None
+            matplotlib axes to draw on. If None, the current axes is fetched
+            with :func:`gca()`.
+
+        Returns
+        -------
+        :class:`matplotlib.Axes`
+            matplotlib axes used for drawing. Either the passed :attr:`ax`
+            argument or the one fetch from the current figure.
+        """
+
+        if ax is None:
+            import matplotlib.pyplot as mplt
+            ax = mplt.gca()
+
+        ax.plot(self.network.f, np.abs(self.network.z[:, i, j]), 'r-',
+                label='Samples')
+        ax.plot(freqs, np.abs(self.get_model_response(i, j, freqs)), 'k--',
+                label='Fit')
+        return ax
+
+    @check_plotting
     def plot_z_re(self, i : int, j: int, freqs: Any = None,
                   ax: mplt.Axes = None) -> mplt.Axes:
         """
@@ -1685,7 +1725,8 @@ class VectorFitting:
 
     @check_plotting
     def plot_zH_eigenvalues(self, freqs: Any = None, ax: mplt.Axes = None,
-            fname: str = None, fsize : float = 20.0) -> mplt.Axes:
+            fname: str = None, fsize : float = 20.0,
+            ylim : list = None) -> mplt.Axes:
         """
         Plots the eigenvalues of the vector fitted Hermitian part of Z-matrix in
         linear scale.
@@ -1745,6 +1786,10 @@ class VectorFitting:
             tick.set_fontsize(fsize)
         ax.set_xlabel('Frequency (Hz)', fontsize=fsize)
         ax.set_ylabel('Magnitude', fontsize=fsize)
+
+        if ylim is not None:
+            ax.set_ylim(ylim)
+
         hdls, lbls = ax.get_legend_handles_labels()
         ax.legend(hdls, lbls, loc='best', fontsize=fsize)
 
