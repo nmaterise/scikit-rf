@@ -263,6 +263,8 @@ class VectorFittingTestCase(unittest.TestCase):
         #               fit_constant=True)
         vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=True,
                       fit_constant=True, parameter_type='z')
+        # vf.vector_fit(n_poles_real=0, n_poles_cmplx=20, fit_proportional=True,
+        #               fit_constant=True, parameter_type='z')
 
         # Write the VectorFit results to file
         print('Computing ABCDE matrices ...')
@@ -312,12 +314,15 @@ class VectorFittingTestCase(unittest.TestCase):
         # test if model is not passive
         vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=False,
                       fit_constant=True, parameter_type='z')
+        # vf.vector_fit(n_poles_real=0, n_poles_cmplx=20, fit_proportional=False,
+        #               fit_constant=True, parameter_type='z')
         print('Computing regions of passivity violations of Z ...')
         violation_bands = vf.passivity_test(parameter_type='Z')
 
         # enforce passivity with default settings
         print('Applying passivity correction to Z ...')
-        vf.passivity_enforce(parameter_type='Z')
+        vf.max_iterations = 100
+        vf.passivity_enforce(parameter_type='Z', n_samples=100) # freqs.size)
 
         # plot the eigenvalues of the Hermitian part of Z to check if there are
         # any passivity violations that went undetected
@@ -340,6 +345,11 @@ class VectorFittingTestCase(unittest.TestCase):
                 vf.plot_z_im(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_passive_im_mcdermott.pdf', format='pdf')
         mplt.close('all')
+
+        # plot the passivity vs. iteration
+        fig, ax = mplt.subplots(1, 1, tight_layout=True)
+        vf.plot_passivation(ax=ax)
+        fig.savefig('min_eig_vs_iter_mcdermott.pdf', format='pdf')
 
         # check if model is now passive
         self.assertTrue(vf.is_passive())

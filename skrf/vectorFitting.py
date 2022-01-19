@@ -902,9 +902,9 @@ class VectorFitting:
         ## Hybrid (Y or Z) matrix representations
         elif (parameter_type.lower() == 'z') or (parameter_type.lower() == 'y'):
             # build half-size test matrix P from state-space matrices A, B, C, D
-            inv_D = np.linalg.inv(-2.0 * D)
+            inv_D  = np.linalg.inv(-2.0 * D)
             prod_D = 2.0 * np.matmul(np.matmul(B, inv_D), C)
-            P = np.matmul(A, A) + np.matmul(prod_D, A)
+            P      = np.matmul(A, A) + np.matmul(prod_D, A)
 
         else:
             raise KeyError(f'Unrecognized parameter_type ({parameter_type}).')
@@ -930,7 +930,7 @@ class VectorFitting:
         # purely imaginary square roots of eigenvalues identify frequencies
         # (2*pi*f) of borders of passivity violations
         freqs_violation = []
-        for sqrt_eigenval in np.sqrt(P_eigs):
+        for sqrt_eigenval in np.lib.scimath.sqrt(P_eigs):
             if np.real(sqrt_eigenval) == 0.0:
                 freqs_violation.append(np.imag(sqrt_eigenval) / 2 / np.pi)
 
@@ -1002,20 +1002,23 @@ class VectorFitting:
         else:
             return False
 
-    def passivity_enforce(self, n_samples: int = 100, parameter_type: str = 's') -> None:
+    def passivity_enforce(self, n_samples: int = 100,
+                          parameter_type: str = 's') -> None:
         """
-        Enforces the passivity of the vector fitted model, if required. This is an implementation of the method
-        presented in [#]_.
+        Enforces the passivity of the vector fitted model, if required. This is
+        an implementation of the method presented in [#]_.
 
         Parameters
         ----------
         n_samples : int, optional
-            Number of linearly spaced frequency samples at which passivity will be evaluated and enforce. (Default: 100)
+            Number of linearly spaced frequency samples at which passivity will
+            be evaluated and enforce. (Default: 100)
 
         parameter_type : str, optional
-            Representation type of the fitted frequency responses. Either *scattering* (:attr:`s` or :attr:`S`),
-            *impedance* (:attr:`z` or :attr:`Z`) or *admittance* (:attr:`y` or :attr:`Y`). Currently, only scattering
-            parameters are supported for passivity evaluation.
+            Representation type of the fitted frequency responses. Either
+            *scattering* (:attr:`s` or :attr:`S`), *impedance* (:attr:`z` or
+            :attr:`Z`) or *admittance* (:attr:`y` or :attr:`Y`). Currently, only
+            scattering parameters are supported for passivity evaluation.
 
         Returns
         -------
@@ -1024,10 +1027,12 @@ class VectorFitting:
         Raises
         ------
         NotImplementedError
-            If the function is called for `parameter_type` different than `S` (scattering).
+            If the function is called for `parameter_type` different than `S`
+            (scattering).
 
         ValueError
-            If the function is used with a model containing nonzero proportional coefficients.
+            If the function is used with a model containing nonzero proportional
+            coefficients.
 
         See Also
         --------
@@ -1037,15 +1042,16 @@ class VectorFitting:
 
         References
         ----------
-        .. [#] T. Dhaene, D. Deschrijver and N. Stevens, "Efficient Algorithm for Passivity Enforcement of S-Parameter-
-            Based Macromodels," in IEEE Transactions on Microwave Theory and Techniques, vol. 57, no. 2, pp. 415-420,
-            Feb. 2009, DOI: 10.1109/TMTT.2008.2011201.
+        .. [#] T. Dhaene, D. Deschrijver and N. Stevens, "Efficient Algorithm
+        for Passivity Enforcement of S-Parameter- Based Macromodels," in IEEE
+        Transactions on Microwave Theory and Techniques, vol. 57, no. 2, pp.
+        415-420, Feb. 2009, DOI: 10.1109/TMTT.2008.2011201.
         """
 
         if parameter_type.lower() != 's':
-            is_hybrid = False
-        else:
             is_hybrid = True
+        else:
+            is_hybrid = False
         if (parameter_type.lower() == 's') \
                 and (len(np.flatnonzero(self.proportional_coeff)) > 0):
             raise ValueError('Passivity testing of scattering parameters with '
@@ -1065,7 +1071,13 @@ class VectorFitting:
         A, B, C, D, E = self._get_ABCDE()
         dim_A = np.shape(A)[0]
         C_t = C
-        delta = 0.999   # predefined tolerance parameter (users should not need to change this)
+
+        # change delta according to hybrid or scattering problem
+        # predefined tolerance parameter (users should not need to change this)
+        if is_hybrid:
+            delta = -1e-4
+        else:
+            delta = 0.999   
 
         # iterative compensation of passivity violations
         t = 0
@@ -1083,14 +1095,17 @@ class VectorFitting:
                 s_eval = self._get_s_from_ABCDE(freq_eval, A, B, C_t, D, E)
 
                 # singular value decomposition
+                # or eigenvalue decomposition
                 if is_hybrid:
-                    sigma, u = np.linalg.eig(s_eval.T.conj() + s_eval)
+                    sigma, u = np.linalg.eig((s_eval.T.conj() + s_eval) / 2.)
                     vh = np.linalg.inv(u)
                     # keep track of the smallest eigenvalue in every
                     # iteration step
-                    if np.amin(sigma) > sigma_max:
+                    if np.amin(sigma) < sigma_max:
                         sigma_max = np.amin(sigma)
-                    sign = 1.0
+                        if (not (i_eval % 50)) and (not (t % 10)):
+                            print(f'min(lamb): {sigma_max}')
+                    sign = -1.0
                 else:
                     u, sigma, vh = np.linalg.svd(s_eval)
 
@@ -1100,40 +1115,58 @@ class VectorFitting:
                         sigma_max = np.amax(sigma)
                     sign = -1.0
 
-                # prepare and fill the square matrices 'gamma' and 'psi' marking passivity violations
+                # prepare and fill the square matrices 'gamma' and 'psi' marking
+                # passivity violations
                 gamma = np.diag(sigma)
                 psi = np.diag(sigma)
-                for i, sigma_i in enumerate(sigma):
-                    if sigma_i <= delta:
-                        gamma[i, i] = 0
-                        psi[i, i] = 0
-                    else:
-                        gamma[i, i] = 1
-                        psi[i, i] = delta
+                if is_hybrid:
+                    for i, sigma_i in enumerate(sigma):
+                        if sigma_i >= delta:
+                            gamma[i, i] = 0
+                            psi[i, i] = 0
+                        else:
+                            gamma[i, i] = 1
+                            psi[i, i] = delta
+                else:
+                    for i, sigma_i in enumerate(sigma):
+                        if sigma_i <= delta:
+                            gamma[i, i] = 0
+                            psi[i, i] = 0
+                        else:
+                            gamma[i, i] = 1
+                            psi[i, i] = delta
 
                 # calculate violation S-matrix
-                # s_viol is again a complex NxN S-matrix (N: number of network ports)
+                # s_viol is again a complex NxN S-matrix (N: number of network
+                # ports)
                 sigma_viol = np.matmul(np.diag(sigma), gamma) - psi
                 s_viol = np.matmul(np.matmul(u, sigma_viol), vh)
 
                 # Laplace frequency of this sample in the sweep
                 s_k = 2j * np.pi * freq_eval
 
-                # build matrix system for least-squares fitting of new set of violation residues C_viol
-                # using rule for transpose of matrix products: transpose(A * B) = transpose(B) * transpose(A)
-                # hence, S = C * coeffs <===> transpose(S) = transpose(coeffs) * transpose(C)
-                coeffs = np.transpose(np.matmul(np.linalg.inv(s_k * np.identity(dim_A) - A), B))
+                # build matrix system for least-squares fitting of new set of
+                # violation residues C_viol using rule for transpose of matrix
+                # products: transpose(A * B) = transpose(B) * transpose(A)
+                # hence, S = C * coeffs <===> transpose(S) = transpose(coeffs) *
+                # transpose(C)
+                coeffs = np.transpose(np.matmul(np.linalg.inv(
+                                      s_k * np.identity(dim_A) - A), B))
                 if i_eval == 0:
                     A_matrix = np.vstack([np.real(coeffs), np.imag(coeffs)])
-                    b_vector = np.vstack([np.real(np.transpose(s_viol)), np.imag(np.transpose(s_viol))])
+                    b_vector = np.vstack([np.real(np.transpose(s_viol)),
+                                          np.imag(np.transpose(s_viol))])
                 else:
-                    A_matrix = np.concatenate((A_matrix, np.vstack([np.real(coeffs),
-                                                                    np.imag(coeffs)])), axis=0)
-                    b_vector = np.concatenate((b_vector, np.vstack([np.real(np.transpose(s_viol)),
-                                                                    np.imag(np.transpose(s_viol))])), axis=0)
+                    A_matrix = np.concatenate((A_matrix,
+                        np.vstack([np.real(coeffs), np.imag(coeffs)])), axis=0)
+                    b_vector = np.concatenate((b_vector,
+                        np.vstack([np.real(np.transpose(s_viol)),
+                            np.imag(np.transpose(s_viol))])), axis=0)
 
             # solve least squares
-            x, residuals, rank, singular_vals = np.linalg.lstsq(A_matrix, b_vector, rcond=None)
+            x, residuals, rank, singular_vals = np.linalg.lstsq(A_matrix,
+                                                                b_vector,
+                                                                rcond=None)
 
             C_viol = np.transpose(x)
 
@@ -1143,10 +1176,15 @@ class VectorFitting:
             self.history_max_sigma.append(sigma_max)
 
             # stop iterations when model is passive
-            if sigma_max < 1.0:
-                break
+            if is_hybrid:
+                if sigma_max > 0.0:
+                    break
+            else:
+                if sigma_max < 1.0:
+                    break
 
-        # PASSIVATION PROCESS DONE; model is either passive or max. number of iterations have been exceeded
+        # PASSIVATION PROCESS DONE; model is either passive or max. number of
+        # iterations have been exceeded
         if t == self.max_iterations:
             warnings.warn('Passivity enforcement: Aborting after the max. number of iterations has been exceeded.',
                           RuntimeWarning, stacklevel=2)
@@ -1167,20 +1205,22 @@ class VectorFitting:
                         k += 1
                     else:
                         # complex-conjugate pole --> complex-conjugate residue
-                        self.residues[i_response, z] = C_t[i, k] + 1j * C_t[i, k + 1]
+                        self.residues[i_response, z] = C_t[i, k] \
+                                                     + 1j * C_t[i, k + 1]
                         k += 2
                     z += 1
 
     def write_npz(self, path: str) -> None:
         """
         Writes the model parameters in :attr:`poles`, :attr:`residues`,
-        :attr:`proportional_coeff` and :attr:`constant_coeff` to a labeled NumPy .npz file.
+        :attr:`proportional_coeff` and :attr:`constant_coeff` to a labeled NumPy
+        .npz file.
 
         Parameters
         ----------
         path : str
-            Target path without filename for the export. The filename will be added automatically based on the network
-            name in :attr:`network`
+            Target path without filename for the export. The filename will be
+            added automatically based on the network name in :attr:`network`
 
         Returns
         -------
@@ -1192,7 +1232,8 @@ class VectorFitting:
         """
 
         if self.poles is None:
-            warnings.warn('Nothing to export; Poles have not been fitted.', RuntimeWarning, stacklevel=2)
+            warnings.warn('Nothing to export; Poles have not been fitted.',
+                    RuntimeWarning, stacklevel=2)
             return
         if self.residues is None:
             warnings.warn('Nothing to export; Residues have not been fitted.', RuntimeWarning, stacklevel=2)
@@ -1772,7 +1813,7 @@ class VectorFitting:
         for i in range(len(freqs)):
             Z           = self._get_s_from_ABCDE(freqs[i], A, B, C, D, E)
             ev          = np.sort(np.real(
-                          np.linalg.eigvals((Z.T.conj() + Z)/2)))
+                          np.linalg.eigvals((Z.T.conj() + Z) / 2)))
             evals[:, i] = ev
 
         # plot the frequency response of each singular value

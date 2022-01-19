@@ -88,7 +88,7 @@ Room temperature (kind of)
 
 # S-parameter definition labels and default definition
 S_DEFINITIONS = ['power', 'pseudo', 'traveling']
-S_DEF_DEFAULT = 'pseudo' # 'power'
+S_DEF_DEFAULT = 'traveling' # 'pseudo' # 'power'
 
 NumberLike = Union[Number, Sequence[Number], npy.ndarray]
 
