@@ -1098,7 +1098,7 @@ class VectorFitting:
                 # or eigenvalue decomposition
                 if is_hybrid:
                     sigma, u = np.linalg.eig((s_eval.T.conj() + s_eval) / 2.)
-                    vh = np.linalg.inv(u)
+                    vh = u.T.conj() # np.linalg.inv(u)
                     # keep track of the smallest eigenvalue in every
                     # iteration step
                     if np.amin(sigma) < sigma_max:

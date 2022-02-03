@@ -253,6 +253,12 @@ class VectorFittingTestCase(unittest.TestCase):
         vf       = skrf.vectorFitting.VectorFitting(nw)
         vf.freqs = freqs
 
+        # Check for the data scales on the input
+        Zmin = np.min([np.min(np.real(np.linalg.eigvals((Z[k, :, :] 
+                            + Z[k, :, :].T.conj()) / 2)))
+            for k in range(freqs.size)])
+        print(f'Zmin: {Zmin}')
+
         # # Plot the eigenvalues before vector fit
         # fname = 'zH_data_mcdermott.pdf'
         # print('Plotting eigenvalues of ZH ...')
@@ -276,6 +282,29 @@ class VectorFittingTestCase(unittest.TestCase):
                           fname)
         Zfit = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E)
                          for f in freqs])
+        Zfitmin = np.min([np.min(np.real(np.linalg.eigvals((Zfit[k, :, :] 
+                            + Zfit[k, :, :].T.conj()) / 2)))
+                            for k in range(freqs.size)])
+        print(f'Zfitmin: {Zfitmin}')
+
+        # Check for asymptotic passivity, and refit without negative eigenvalues
+        # in the D-matrix
+        Deig, UD = np.linalg.eig(D)
+        if np.any(Deig < 0):
+            print(f'Deig: {Deig}')
+            pidx = np.where(Deig > 0)
+            Deig_posdef = np.zeros(Deig.size)
+            Deig_posdef[pidx] = Deig[pidx]
+            D_asym = UD @ np.diag(Deig_posdef) @ np.linalg.inv(UD)
+
+            # Rerun vector fit with a new Z
+            Z_asym  = np.array([vf._get_s_from_ABCDE(ff, A, B, C, D_asym, E)
+                                for ff in freqs])
+            nw_asym = skrf.Network.from_z(Z_asym, f=freqs)
+            vf = skrf.vectorFitting.VectorFitting(nw_asym)
+
+            vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=True,
+                      fit_constant=True, parameter_type='z')
 
         # Plot the eigenvalues after vector fit
         fname = 'zH_vf_mcdermott.pdf'
@@ -322,7 +351,35 @@ class VectorFittingTestCase(unittest.TestCase):
         # enforce passivity with default settings
         print('Applying passivity correction to Z ...')
         vf.max_iterations = 100
-        vf.passivity_enforce(parameter_type='Z', n_samples=100) # freqs.size)
+        vf.passivity_enforce(parameter_type='Z', n_samples=freqs.size) # freqs.size)
+
+        # write the passive ABCDE matrices to file
+        print('Computing ABCDE matrices ...')
+        A, B, C, D, E = vf._get_ABCDE()
+        Deig, UD = np.linalg.eig(D)
+        print(f'Deig: {Deig}')
+        dstr = '220201'
+        fname = f'mcdermott_vf_abcde_{dstr}.hdf5'
+        print('Writing ABCDE matrices to file ...')
+        skrf.write_to_hdf([freqs, A, B, C, D, E],
+                          ['f', 'A', 'B', 'C', 'D', 'E'],
+                          fname)
+
+        # get the updated Z matrix and the mininum eigenvalues
+        Sfitpass = np.array([vf.network.s[:, i, j] for i in range(Nports)
+                            for j in range(Nports)]).reshape([vf.network.f.size,
+                                Nports, Nports])
+        Zfitpass = np.array([vf.network.z[:, i, j] for i in range(Nports)
+                            for j in range(Nports)]).reshape([vf.network.f.size,
+                                Nports, Nports])
+        Sfitpassmin = np.min([np.min(np.real(np.linalg.eigvals((
+                Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
+                            for k in range(vf.network.f.size)])
+        Zfitpassmin = np.min([np.min(np.real(np.linalg.eigvals((
+                Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
+                            for k in range(vf.network.f.size)])
+        print(f'Zfitpassmin: {Zfitpassmin}')
+        print(f'Sfitpassmin: {Sfitpassmin}')
 
         # plot the eigenvalues of the Hermitian part of Z to check if there are
         # any passivity violations that went undetected
