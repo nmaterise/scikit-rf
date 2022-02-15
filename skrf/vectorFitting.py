@@ -1003,7 +1003,7 @@ class VectorFitting:
             return False
 
     def passivity_enforce(self, n_samples: int = 100,
-                          parameter_type: str = 's') -> None:
+            parameter_type: str = 's', delta_in : float = None) -> None:
         """
         Enforces the passivity of the vector fitted model, if required. This is
         an implementation of the method presented in [#]_.
@@ -1075,7 +1075,8 @@ class VectorFitting:
         # change delta according to hybrid or scattering problem
         # predefined tolerance parameter (users should not need to change this)
         if is_hybrid:
-            delta = -1e-4
+            # delta = 1e-4
+            delta = delta_in if delta_in else 1e-2
         else:
             delta = 0.999   
 
@@ -1767,7 +1768,7 @@ class VectorFitting:
     @check_plotting
     def plot_zH_eigenvalues(self, freqs: Any = None, ax: mplt.Axes = None,
             fname: str = None, fsize : float = 20.0,
-            ylim : list = None) -> mplt.Axes:
+            ylim : list = None, plot_min_only : bool = False) -> mplt.Axes:
         """
         Plots the eigenvalues of the vector fitted Hermitian part of Z-matrix in
         linear scale.
@@ -1812,13 +1813,18 @@ class VectorFitting:
         # calculate and save eigenvalues for each frequency
         for i in range(len(freqs)):
             Z           = self._get_s_from_ABCDE(freqs[i], A, B, C, D, E)
-            ev          = np.sort(np.real(
-                          np.linalg.eigvals((Z.T.conj() + Z) / 2)))
+            ev          = np.sort(
+                          np.linalg.eigvalsh(np.real((Z.conj().T + Z) / 2)))
             evals[:, i] = ev
 
         # plot the frequency response of each singular value
-        for n in range(n_ports):
-            ax.plot(freqs, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
+        if plot_min_only:
+            ax.plot(freqs, np.zeros(len(freqs)), 'k:')
+            ax.plot(freqs, evals[0, :], label=r'$\lambda_{\mathrm{min}}$')
+        else:
+            for n in range(n_ports):
+                ax.plot(freqs, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
+            ax.plot(freqs, np.zeros(len(freqs)), 'k:')
 
         # Set the axes fontsizes
         for tick in ax.get_xticklabels():
@@ -1828,8 +1834,14 @@ class VectorFitting:
         ax.set_xlabel('Frequency (Hz)', fontsize=fsize)
         ax.set_ylabel('Magnitude', fontsize=fsize)
 
+        # Upper, lower, or both y-limits
         if ylim is not None:
-            ax.set_ylim(ylim)
+            if ylim[0] is None:
+                ax.set_ylim(top=ylim[1])
+            elif ylim[1] is None:
+                ax.set_ylim(bottom=ylim[0])
+            else:
+                ax.set_ylim(ylim)
 
         hdls, lbls = ax.get_legend_handles_labels()
         ax.legend(hdls, lbls, loc='best', fontsize=fsize)

@@ -5,7 +5,11 @@ import tempfile
 import os
 import warnings
 import matplotlib.pyplot as mplt
-# import pytest
+
+
+"""
+pytest -s -v -c "" skrf/tests/test_vectorfitting.py -k "test_passivity_enforcement_hybrid_mcdermott"
+"""
 
 
 test_all = False
@@ -290,26 +294,42 @@ class VectorFittingTestCase(unittest.TestCase):
         # Check for asymptotic passivity, and refit without negative eigenvalues
         # in the D-matrix
         Deig, UD = np.linalg.eig(D)
+        Eeig, UE = np.linalg.eig(E)
+        eps = 1e-8
         if np.any(Deig < 0):
             print(f'Deig: {Deig}')
+            print(f'Eeig: {Eeig}')
             pidx = np.where(Deig > 0)
+            peidx = np.where(Eeig > 0)
+            nidx = np.where(Deig < 0)
+            neidx = np.where(Eeig < 0)
             Deig_posdef = np.zeros(Deig.size)
+            Eeig_posdef = np.zeros(Eeig.size)
             Deig_posdef[pidx] = Deig[pidx]
+            Eeig_posdef[peidx] = Eeig[peidx]
+            Deig_posdef[nidx]  = eps * np.ones(len(nidx)) 
+            Eeig_posdef[neidx] = eps * np.ones(len(neidx))
             D_asym = UD @ np.diag(Deig_posdef) @ np.linalg.inv(UD)
+            E_asym = UE @ np.diag(Eeig_posdef) @ np.linalg.inv(UE)
+            print(f'Deig_asym: {Deig_posdef}')
+            print(f'Eeig_asym: {Eeig_posdef}')
 
             # Rerun vector fit with a new Z
-            Z_asym  = np.array([vf._get_s_from_ABCDE(ff, A, B, C, D_asym, E)
-                                for ff in freqs])
+            Z_asym  = np.array([vf._get_s_from_ABCDE(ff, A, B, C, D_asym,
+                                E_asym) for ff in freqs])
             nw_asym = skrf.Network.from_z(Z_asym, f=freqs)
             vf = skrf.vectorFitting.VectorFitting(nw_asym)
 
-            vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=True,
+            vf.vector_fit(n_poles_real=2, n_poles_cmplx=5,
+                    fit_proportional=False,
                       fit_constant=True, parameter_type='z')
 
         # Plot the eigenvalues after vector fit
         fname = 'zH_vf_mcdermott.pdf'
         print('Plotting eigenvalues of ZH ...')
         vf.plot_zH_eigenvalues(freqs=freqs, fname=fname)
+        fname = 'zH_min_vf_mcdermott.pdf'
+        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, plot_min_only=True)
 
         # plot the real, imaginary components of the impedance
         # real part
@@ -341,8 +361,9 @@ class VectorFittingTestCase(unittest.TestCase):
         mplt.close('all')
 
         # test if model is not passive
-        vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=False,
-                      fit_constant=True, parameter_type='z')
+        # vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=False,
+        #               fit_constant=True, parameter_type='z')
+
         # vf.vector_fit(n_poles_real=0, n_poles_cmplx=20, fit_proportional=False,
         #               fit_constant=True, parameter_type='z')
         print('Computing regions of passivity violations of Z ...')
@@ -350,14 +371,19 @@ class VectorFittingTestCase(unittest.TestCase):
 
         # enforce passivity with default settings
         print('Applying passivity correction to Z ...')
-        vf.max_iterations = 100
-        vf.passivity_enforce(parameter_type='Z', n_samples=freqs.size) # freqs.size)
+        # vf.max_iterations = 100
+        vf.max_iterations = 20
+        # vf.passivity_enforce(parameter_type='Z', n_samples=10*freqs.size) # freqs.size)
+        vf.passivity_enforce(parameter_type='Z', n_samples=2*freqs.size,
+                            delta_in=1e-2) # freqs.size)
 
         # write the passive ABCDE matrices to file
-        print('Computing ABCDE matrices ...')
+        print('Computing passive ABCDE matrices ...')
         A, B, C, D, E = vf._get_ABCDE()
         Deig, UD = np.linalg.eig(D)
+        Eeig, ED = np.linalg.eig(E)
         print(f'Deig: {Deig}')
+        print(f'Eeig: {Eeig}')
         dstr = '220201'
         fname = f'mcdermott_vf_abcde_{dstr}.hdf5'
         print('Writing ABCDE matrices to file ...')
@@ -366,26 +392,25 @@ class VectorFittingTestCase(unittest.TestCase):
                           fname)
 
         # get the updated Z matrix and the mininum eigenvalues
-        Sfitpass = np.array([vf.network.s[:, i, j] for i in range(Nports)
-                            for j in range(Nports)]).reshape([vf.network.f.size,
-                                Nports, Nports])
-        Zfitpass = np.array([vf.network.z[:, i, j] for i in range(Nports)
-                            for j in range(Nports)]).reshape([vf.network.f.size,
-                                Nports, Nports])
-        Sfitpassmin = np.min([np.min(np.real(np.linalg.eigvals((
-                Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
-                            for k in range(vf.network.f.size)])
+        Zfitpass = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E) for f in
+                            vf.network.f])
         Zfitpassmin = np.min([np.min(np.real(np.linalg.eigvals((
                 Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
                             for k in range(vf.network.f.size)])
-        print(f'Zfitpassmin: {Zfitpassmin}')
-        print(f'Sfitpassmin: {Sfitpassmin}')
+        Zfitpassminidx = np.argmin([np.min(np.real(np.linalg.eigvals((
+                Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
+                            for k in range(vf.network.f.size)])
+        Zfitpassminfreq = vf.network.f[Zfitpassminidx]
+        print(f'Zfitpassmin(f={Zfitpassminfreq}): {Zfitpassmin}')
 
         # plot the eigenvalues of the Hermitian part of Z to check if there are
         # any passivity violations that went undetected
         fname = 'zH_passive_mcdermott.pdf'
         print('Plotting passive eigenvalues of ZH ...')
-        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, ylim=[-0.5, 1.3])
+        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, ylim=[-0.5, None])
+        fname = 'zH_min_passive_mcdermott.pdf'
+        vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, ylim=None,
+                plot_min_only=True) #[-0.5, 1.3])
 
         # plot the matrix values of the impedance
         # plot the real, imaginary components of the impedance
@@ -409,7 +434,7 @@ class VectorFittingTestCase(unittest.TestCase):
         fig.savefig('min_eig_vs_iter_mcdermott.pdf', format='pdf')
 
         # check if model is now passive
-        self.assertTrue(vf.is_passive())
+        self.assertTrue(vf.is_passive(parameter_type='Z'))
 
     # #@pytest.mark.skipif(not test_all)
     # def test_vf_pole_count_hybrid_mcdermott(self, use_real_imag=False):
