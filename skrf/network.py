@@ -1286,7 +1286,8 @@ class Network(object):
         a :class:`Network` object with 'inverse' s-parameters.
 
         This is used for de-embedding.
-        It is defined such that the inverse of the s-matrix cascaded with itself is a unity scattering transfer parameter (T) matrix.
+        It is defined such that the inverse of the s-matrix cascaded with itself
+        is a unity scattering transfer parameter (T) matrix.
 
         Returns
         -------
@@ -2416,9 +2417,9 @@ class Network(object):
 
 
     # interpolation
-    def interpolate(self, freq_or_n: Union[Frequency, NumberLike], basis: str = 's',
-                    coords: str = 'cart', f_kwargs: dict = {}, return_array: bool = False,
-                    **kwargs) -> Union['Network', npy.ndarray]:
+    def interpolate(self, freq_or_n: Union[Frequency, NumberLike], basis: str =
+            's', coords: str = 'cart', f_kwargs: dict = {}, 
+            return_array: bool = False, **kwargs) -> Union['Network', npy.ndarray]:
         r"""
         Interpolate a Network along frequency axis
 
@@ -5330,7 +5331,8 @@ def s2t(s: npy.ndarray) -> npy.ndarray:
     return t
 
 
-def z2s(z: NumberLike, z0:NumberLike = 50, s_def: str = S_DEF_DEFAULT) -> npy.ndarray:
+def z2s(z: NumberLike, z0:NumberLike = 50,
+        s_def: str = S_DEF_DEFAULT) -> npy.ndarray:
     r"""
     convert impedance parameters [#]_ to scattering parameters [#]_
 
@@ -6291,7 +6293,8 @@ def reciprocity(s: npy.ndarray) -> npy.ndarray:
 
 
 ## renormalize
-def renormalize_s(s: npy.ndarray, z_old: NumberLike, z_new: NumberLike, s_def:str = S_DEF_DEFAULT) -> npy.ndarray:
+def renormalize_s(s: npy.ndarray, z_old: NumberLike, z_new: NumberLike,
+                  s_def:str = S_DEF_DEFAULT) -> npy.ndarray:
 
     """
     Renormalize a s-parameter matrix given old and new port impedances

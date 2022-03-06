@@ -853,3 +853,17 @@ def write_to_hdf(data_list, key_list, fname):
 
     # Close the file handle
     fid.close()
+
+
+def read_from_hdf(fname : str):
+    """
+    Read all HDF5 data from a file and return as a dictionary
+    """
+    # Open the file and iterate over the keys
+    fid = hdf.File(fname, 'r')
+    out = {}
+    for k in fid.keys():
+        out.update({k : fid[k][()]})
+
+    fid.close()
+    return out
