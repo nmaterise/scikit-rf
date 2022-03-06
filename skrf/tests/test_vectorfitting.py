@@ -10,6 +10,7 @@ import matplotlib.pyplot as mplt
 """
 pytest -s -v -c "" skrf/tests/test_vectorfitting.py -k "test_passivity_enforcement_hybrid_mcdermott"
 """
+import datetime
 
 
 test_all = False
@@ -390,6 +391,12 @@ class VectorFittingTestCase(unittest.TestCase):
         skrf.write_to_hdf([freqs, A, B, C, D, E],
                           ['f', 'A', 'B', 'C', 'D', 'E'],
                           fname)
+
+        print('Writing poles and residues to file ...')
+        dstr = datetime.datetime.today().strftime('%y%m%d')
+        fname = f'mcdermott_vf_poles_residues_{dstr}.hdf5'
+        skrf.write_to_hdf([freqs, vf.poles, vf.residues, D], 
+                          ['f', 'poles', 'residues', 'D'], fname)
 
         # get the updated Z matrix and the mininum eigenvalues
         Zfitpass = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E) for f in
