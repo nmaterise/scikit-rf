@@ -346,8 +346,9 @@ class Network(object):
     """
 
     # CONSTRUCTOR
-    def __init__(self, file: str = None, name: str = None, comments: str = None,
-                 f_unit: str = None, s_def: str = S_DEF_DEFAULT, **kwargs) -> None:
+    def __init__(self, file: str = None, name: str = None, params: dict = None,
+                 comments: str = None, f_unit: str = None, 
+                 s_def: str = S_DEF_DEFAULT, **kwargs) -> None:
         r"""
         Network constructor.
 
@@ -360,12 +361,14 @@ class Network(object):
 
         file : str or file-object
             file to load information from. supported formats are:
-             * touchstone file (.s?p)
+             * touchstone file (.s?p) (or .ts)  
+             * io.StringIO object (with `.name` property which contains the file extension, such as `myfile.s4p`)
              * pickled Network (.ntwk, .p) see :func:`write`
-        name : str
-            Name of this Network. if None will try to use file, if
-            its a str
-        comments : str
+        name : str, optional
+            Name of this Network. if None will try to use file, if it is a str
+        params : dict, optional
+            Dictionnary of parameters associated with the Network            
+        comments : str, optional
             Comments associated with the Network
         s_def : str -> s_def :  can be: 'power', 'pseudo' or 'traveling'
             Scattering parameter definition : 'power' for power-waves definition,
@@ -376,6 +379,7 @@ class Network(object):
         \*\*kwargs :
             key word arguments can be used to assign properties of the
             Network, such as `s`, `f` and `z0`.
+            keyword `encoding` can be used to define the Touchstone file encoding.
 
         Examples
         --------
@@ -396,6 +400,10 @@ class Network(object):
         Directly from values
 
         >>> n = rf.Network(f=[1,2,3], s=[1,2,3], z0=[1,2,3])
+        
+        Define some parameters associated with the Network
+        
+        >>> n = rf.Network('ntwk1.s2p', params={'temperature': 25, 'voltage':5})
 
         See Also
         --------
@@ -410,9 +418,11 @@ class Network(object):
             file = kwargs['touchstone_filename']
 
         self.name = name
+        self.params = params
         self.comments = comments
         self.port_names = None
-
+        self.encoding = kwargs.pop('encoding', None)
+                
         self.deembed = None
         self.noise = None
         self.noise_freq = None
@@ -429,7 +439,7 @@ class Network(object):
 
             # allows user to pass StringIO, filename or file obj
             if isinstance(file, io.StringIO):
-                self.read_touchstone(file)
+                self.read_touchstone(file, self.encoding)
 
             else:
                 # open file in 'binary' mode because we are going to try and
@@ -445,7 +455,7 @@ class Network(object):
                     # non-binary mode and try to read it as touchstone
                     filename = fid.name
                     fid.close()
-                    self.read_touchstone(filename)
+                    self.read_touchstone(filename, self.encoding)
 
             if name is None and isinstance(file, str):
                 name = os.path.splitext(os.path.basename(file))[0]
@@ -1083,6 +1093,10 @@ class Network(object):
         """
         return s2t(self.s)
 
+    @t.setter
+    def t(self, value: npy.ndarray) -> None:
+        self._s = t2s(value)
+
     @property
     def s_invert(self) -> npy.ndarray:
         """
@@ -1291,7 +1305,7 @@ class Network(object):
         return out
 
     @property
-    def f(self) -> Frequency:
+    def f(self) -> npy.ndarray:
         """
         the frequency vector for the network, in Hz.
 
@@ -1776,7 +1790,8 @@ class Network(object):
         """
         ntwk = Network(s=self.s,
                        frequency=self.frequency.copy(),
-                       z0=self.z0, s_def=self.s_def
+                       z0=self.z0, s_def=self.s_def,
+                       comments=self.comments, params=self.params
                        )
 
         ntwk.name = self.name
@@ -1913,7 +1928,8 @@ class Network(object):
 
 
     # touchstone file IO
-    def read_touchstone(self, filename: Union[str, TextIO]) -> None:
+    def read_touchstone(self, filename: Union[str, TextIO],
+                        encoding: Union[str, None] = None) -> None:
         """
         loads values from a touchstone file.
 
@@ -1924,7 +1940,9 @@ class Network(object):
         ----------
         filename : str or file-object
             touchstone file name.
-
+        encoding : str, optional
+            define the file encoding to use. Default value is None, 
+            meaning the encoding is guessed.            
 
         Note
         ----
@@ -1933,7 +1951,7 @@ class Network(object):
 
         """
         from .io import touchstone
-        touchstoneFile = touchstone.Touchstone(filename)
+        touchstoneFile = touchstone.Touchstone(filename, encoding=encoding)
 
         if touchstoneFile.get_format().split()[1] != 's':
             raise NotImplementedError('only s-parameters supported for now.')
@@ -2520,32 +2538,32 @@ class Network(object):
 
         # interpolate z0  ( this must happen first, because its needed
         # to compute the basis transform below (like y2s), if basis!='s')
-        interp_z0_re = f_interp(f, self.z0.real, axis=0, **kwargs)
-        interp_z0_im = f_interp(f, self.z0.imag, axis=0, **kwargs)
-        result.z0 = interp_z0_re(f_new) + 1j * interp_z0_im(f_new)
+        if npy.all(self.z0 == self.z0[0]):
+            # If z0 is constant we don't need to interpolate it
+            z0_shape = list(self.z0.shape)
+            z0_shape[0] = len(f_new)
+            result.z0 = npy.ones(z0_shape) * self.z0[0]
+        else:
+            result.z0 = f_interp(f, self.z0, axis=0, **kwargs)(f_new)
 
         # interpolate  parameter for a given basis
         x = self.__getattribute__(basis)
         if coords == 'cart':
-            interp_re = f_interp(f, x.real, axis=0, **kwargs)
-            interp_im = f_interp(f, x.imag, axis=0, **kwargs)
-            x_new =  interp_re(f_new) + 1j * interp_im(f_new)
-
-
+            x_new = f_interp(f, x, axis=0, **kwargs)(f_new)
         elif coords == 'polar':
             rad = npy.unwrap(npy.angle(x), axis=0)
             mag = npy.abs(x)
             interp_rad = f_interp(f, rad, axis=0, **kwargs)
             interp_mag = f_interp(f, mag, axis=0, **kwargs)
             x_new = interp_mag(f_new) * npy.exp(1j * interp_rad(f_new))
+        else:
+            raise ValueError(f'Unknown coords {coords}')
 
         # interpolate noise data too
         if self.noisy:
           f_noise = self.noise_freq.f
           f_noise_new = new_frequency.f
-          interp_noise_re = f_interp(f_noise, self.noise.real, axis=0, **kwargs)
-          interp_noise_im = f_interp(f_noise, self.noise.imag, axis=0, **kwargs)
-          noise_new = interp_noise_re(f_noise_new) + 1j * interp_noise_im(f_noise_new)
+          noise_new = f_interp(f_noise, self.noise, axis=0, **kwargs)(f_noise_new)
 
         if return_array:
             return x_new
