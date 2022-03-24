@@ -1085,7 +1085,7 @@ class VectorFitting:
                 # singular value decomposition
                 # or eigenvalue decomposition
                 if is_hybrid:
-                    sigma, u = np.linalg.eig((s_eval.T.conj() + s_eval) / 2.)
+                    sigma, u = np.linalg.eigh((s_eval.T.conj() + s_eval) / 2.)
                     vh = u.T.conj() # np.linalg.inv(u)
                     # keep track of the smallest eigenvalue in every
                     # iteration step
@@ -1816,7 +1816,8 @@ class VectorFitting:
         # plot the frequency response of each singular value
         if plot_min_only:
             ax.plot(freqs, np.zeros(len(freqs)), 'k:')
-            ax.plot(freqs, evals[0, :], label=r'$\lambda_{\mathrm{min}}$')
+            # ax.plot(freqs, evals[0, :], label=r'$\lambda_{\mathrm{min}}$')
+            ax.plot(freqs, np.min(evals, axis=0), label=r'$\lambda_{\mathrm{min}}$')
         else:
             for n in range(n_ports):
                 ax.plot(freqs, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
@@ -1839,6 +1840,7 @@ class VectorFitting:
             else:
                 ax.set_ylim(ylim)
 
+        ax.set_xscale('log')
         hdls, lbls = ax.get_legend_handles_labels()
         ax.legend(hdls, lbls, loc='best', fontsize=fsize)
 

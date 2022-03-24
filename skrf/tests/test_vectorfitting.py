@@ -326,6 +326,10 @@ class VectorFittingTestCase(unittest.TestCase):
                     fit_proportional=False,
                       fit_constant=True, parameter_type='z')
 
+        # Check the poles and residues here
+        poles_fit    = np.copy(vf.poles)
+        residues_fit = np.copy(vf.residues)
+
         # Plot the eigenvalues after vector fit
         fname = 'zH_vf_mcdermott.pdf'
         print('Plotting eigenvalues of ZH ...')
@@ -381,35 +385,63 @@ class VectorFittingTestCase(unittest.TestCase):
 
         # write the passive ABCDE matrices to file
         print('Computing passive ABCDE matrices ...')
-        A, B, C, D, E = vf._get_ABCDE()
-        Deig, UD = np.linalg.eig(D)
-        Eeig, ED = np.linalg.eig(E)
-        print(f'Deig: {Deig}')
+        A1, B1, C1, D1, E1 = vf._get_ABCDE()
+        Deig, UD = np.linalg.eigh(0.5 * (D1 + D1.T.conj()) )
+        Eeig, ED = np.linalg.eig(E1)
+        print(f'eig (D + D^t)/2: {Deig}')
         print(f'Eeig: {Eeig}')
+    
+        is_C_changed = np.allclose(C, C1)
+        is_R_changed = np.allclose(residues_fit, vf.residues)
+
+        print('Did the passivity update actually happen?')
+        print(f'C == C1? {is_C_changed}')
+        print(f'R == R1? {is_R_changed}')
+        print(f'E1:\n{E1}')
+
         dstr = '220201'
         fname = f'mcdermott_vf_abcde_{dstr}.hdf5'
         print('Writing ABCDE matrices to file ...')
-        skrf.write_to_hdf([freqs, A, B, C, D, E],
+        skrf.write_to_hdf([freqs, A1, B1, C1, D1, E1],
                           ['f', 'A', 'B', 'C', 'D', 'E'],
                           fname)
 
         print('Writing poles and residues to file ...')
         dstr = datetime.datetime.today().strftime('%y%m%d')
         fname = f'mcdermott_vf_poles_residues_{dstr}.hdf5'
-        skrf.write_to_hdf([freqs, vf.poles, vf.residues, D], 
+        skrf.write_to_hdf([freqs, vf.poles, vf.residues, D1], 
                           ['f', 'poles', 'residues', 'D'], fname)
 
         # get the updated Z matrix and the mininum eigenvalues
-        Zfitpass = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E) for f in
-                            vf.network.f])
-        Zfitpassmin = np.min([np.min(np.real(np.linalg.eigvals((
+        print('Computing the eigenvalues of ZH ...')
+        w0 = 8.86688e9
+        freqs_log = np.sort(np.concatenate((
+            np.logspace(np.log10(np.max([w0,1e-3]))-3,
+            np.log10(np.max([w0,1e-3]))+3,1000),
+            np.linspace(np .max([w0,1e-3])*.8,
+            np.max([w0,1e-3])*1.2,100000))))
+        # freqs_log = np.logspace(7, 13, 100001)
+        Zfitpass = np.array([vf._get_s_from_ABCDE(f, A1, B1, C1, D1, E1) 
+                            for f in freqs_log])
+        Zfitpassmin = np.array([np.min(np.real(np.linalg.eigvals((
                 Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
-                            for k in range(vf.network.f.size)])
-        Zfitpassminidx = np.argmin([np.min(np.real(np.linalg.eigvals((
-                Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
-                            for k in range(vf.network.f.size)])
-        Zfitpassminfreq = vf.network.f[Zfitpassminidx]
-        print(f'Zfitpassmin(f={Zfitpassminfreq}): {Zfitpassmin}')
+                            for k in range(freqs_log.size)])
+        # Zfitpassminidx = np.argmin([np.min(np.real(np.linalg.eigvals((
+        #         Zfitpass[k, :, :] + Zfitpass[k, :, :].T.conj()) / 2)))
+        #                     for k in range(vf.network.f.size)])
+        # Zfitpassminfreq = vf.network.f[Zfitpassminidx]
+        # print(f'Zfitpassmin(f={Zfitpassminfreq}): {Zfitpassmin}')
+
+        print('Plotting the eigenvalues of ZH ...')
+        fig, ax = mplt.subplots(1, 1, tight_layout=True)
+        ax.plot(freqs_log, Zfitpassmin)
+        ax.plot(freqs_log, np.zeros(freqs_log.size), 'k--')
+        ax.set_xscale('log')
+        ax.set_xlabel('Frequency [Hz]')
+        ax.set_ylabel(r'Re $\{\lambda\{Z_H(j\omega)\}\}$')
+        ax.set_ylim([-30, 30])
+        fig.savefig('zH_min_passive_check.pdf')
+        mplt.close('all')
 
         # plot the eigenvalues of the Hermitian part of Z to check if there are
         # any passivity violations that went undetected
