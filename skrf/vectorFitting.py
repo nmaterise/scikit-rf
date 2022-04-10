@@ -25,6 +25,9 @@ import logging
 import warnings
 from timeit import default_timer as timer
 
+# Added to find the minimum eigenvalues
+import scipy.optimize
+
 
 def check_plotting(func):
     """
@@ -93,7 +96,7 @@ class VectorFitting:
     .. [#vectfit_website] Vector Fitting website: https://www.sintef.no/projectweb/vectorfitting/
     """
 
-    def __init__(self, network: 'Network'):
+    def __init__(self, network: 'Network', **kwargs):
         self.network = network
 
         self.poles = None
@@ -125,6 +128,13 @@ class VectorFitting:
         self.delta_max_history = []
         self.history_max_sigma = []
         self.history_cond_A = []
+
+        # Internal setting to handle Z, Y matrices or S matrices, if False
+        self.is_hybrid = False
+
+        # Update the internal parameters of the class with the kwargs inputs
+        for k, v in kwargs.items():
+            setattr(self, k, v)
 
     # legacy getter and setter methods to support deprecated 'zeros' attribute (now correctly called 'residues')
     @property
@@ -834,7 +844,7 @@ class VectorFitting:
         stsp_S += D + 2j * np.pi * freq * E
         return stsp_S
 
-    def passivity_test(self, parameter_type: str = 's') -> np.ndarray:
+    def passivity_test(self, parameter_type: str = 'z', Cin = None) -> np.ndarray:
         """
         Evaluates the passivity of reciprocal vector fitted models by means of a half-size test matrix [#]_. Any
         existing frequency bands of passivity violations will be returned as a sorted list.
@@ -873,7 +883,11 @@ class VectorFitting:
             Dec. 2008, DOI: 10.1109/TMTT.2008.2007319.
         """
         # get state-space matrices
-        A, B, C, D, E = self._get_ABCDE()
+        A, B, C0, D, E = self._get_ABCDE()
+        if np.any(Cin):
+            C = Cin
+        else:
+            C = C0
         n_ports = np.shape(D)[0]
 
         # Branch on the scattering or hybrid approaches to passivity testing
@@ -946,22 +960,50 @@ class VectorFitting:
             # and residues used to generate ABCDE have been derived from the
             # appropriate matrix representation
             s_center = self._get_s_from_ABCDE(f_center, A, B, C, D, E)
-            u, sigma, vh = np.linalg.svd(s_center)
+
+            # Handle correct calculation of passivity bands for S and Z/Y
+            # matrices using the SVD of S or eigenvalues of ZH or YH
             passive = True
-            for singval in sigma:
-                if singval > 1:
-                    # passivity violation in this band
-                    passive = False
-            if not passive:
-                # add this band to the list of passivity violations
-                if violation_bands is None:
-                    violation_bands = [[f_start, f_stop]]
-                else:
-                    violation_bands.append([f_start, f_stop])
+            if parameter_type.lower() == 's':
+                ## Compute the singular values of S and iterate as needed
+                u, sigma, vh = np.linalg.svd(s_center)
+                for singval in sigma:
+                    if singval > 1:
+                        # passivity violation in this band
+                        passive = False
+                if not passive:
+                    # add this band to the list of passivity violations
+                    if violation_bands is None:
+                        violation_bands = [[f_start, f_stop]]
+                    else:
+                        violation_bands.append([f_start, f_stop])
+            elif (parameter_type.lower() == 'z') \
+                    or (parameter_type.lower() == 'y'):
+                # Compute the eigenvalues and iterate as needed
+                sigma, u = np.linalg.eigh((s_center + s_center.T.conj())/2.)
+                vh = u.T.conj()
+                for singval in sigma:
+                    if singval < 0:
+                        # passivity violation in this band
+                        passive = False
+                if not passive:
+                    # add this band to the list of passivity violations
+                    if violation_bands is None:
+                        violation_bands = [[f_start, f_stop]]
+                    else:
+                        violation_bands.append([f_start, f_stop])
+            else:
+                raise KeyError(f'{parameter_type}-Parameters not supported.')
+
+        self.violation_bands = np.array(violation_bands)
+
+        for wv in self.violation_bands:
+            print(f'violation band: [{wv[0]/1e9:.2g}'\
+                 +f', {wv[1]/1e9:.2g}]')
 
         return np.array(violation_bands)
 
-    def is_passive(self, parameter_type: str = 's') -> bool:
+    def is_passive(self, parameter_type: str = 'z') -> bool:
         """
         Returns the passivity status of the model as a boolean value.
 
@@ -989,6 +1031,29 @@ class VectorFitting:
         else:
             return False
 
+
+    def find_ZH_min(self, f0, A, B, C, D, E, debug=False):
+        """
+        Computes the minimum eig(ZH) at frequency f
+        """
+        # Wrapper to calculate the eigenvalues of ZH
+        def get_ZH(f):
+            Z = self._get_s_from_ABCDE(f, A, B, C, D, E)
+            zevals, zevecs = np.linalg.eigh((Z.T.conj() + Z) / 2)
+    
+            return np.min(np.real(zevals))
+
+        # Run the minimizer to find f
+        opt_res = scipy.optimize.fmin(get_ZH, f0)
+        freqmin = opt_res[0]
+        ZHmin   = get_ZH(freqmin)
+        if debug:
+            print(f'{opt_res}')
+            print(f'ZHmin[{freqmin}]: {ZHmin}')
+
+        return ZHmin, freqmin
+
+
     def passivity_enforce(self, n_samples: int = 100,
             parameter_type: str = 's', delta_in : float = None) -> None:
         """
@@ -998,7 +1063,8 @@ class VectorFitting:
         Parameters
         ----------
         n_samples : int, optional
-            Number of linearly spaced frequency samples at which passivity will be evaluated and enforced.
+            Number of linearly spaced frequency samples at which passivity will
+            be evaluated and enforced.
             (Default: 100)
 
         parameter_type : str, optional
@@ -1046,15 +1112,6 @@ class VectorFitting:
                              'not make any sense; you need to run vector_fit()'
                              ' with option `fit_proportional=False` first.')
 
-        # always run passivity test first; this will write 'self.violation_bands'
-        violation_bands = self.passivity_test()
-
-        if len(violation_bands) == 0:
-            # model is already passive; do nothing and return
-            logging.info('Passivity enforcement: The model is already passive. Nothing to do.')
-            return
-
-        freqs_eval = np.linspace(0, 1.2 * violation_bands[-1, -1], n_samples)
         A, B, C, D, E = self._get_ABCDE()
         dim_A = np.shape(A)[0]
         C_t = C
@@ -1065,17 +1122,43 @@ class VectorFitting:
             # delta = 1e-4
             delta = delta_in if delta_in else 1e-2
         else:
-            delta = 0.999   
+            delta = 0.999
+
+        # Update the frequency bands after every pass
+        # always run passivity test first; this will write
+        # 'self.violation_bands'
+        violation_bands = self.passivity_test(parameter_type='z')
+
+        if len(violation_bands) == 0:
+            # model is already passive; do nothing and return
+            logging.info('Passivity enforcement: The model is already passive. Nothing to do.')
+            return
+
+        freqs_eval = np.linspace(0, 1.2 * violation_bands[-1, -1], n_samples)
+        # Extend the search range to ensure we look far enough out of band
+        freqs_eval = np.logspace(np.log10(1e-4 * violation_bands[-1,-1]),
+                                 np.log10(1e4 * violation_bands[-1, -1]),
+                                 n_samples)
+
+        # Find the maximum violation
+        ZH_min, freq_min = self.find_ZH_min(freqs_eval[freqs_eval.size//2], A,
+                                            B, C, D, 0*E, debug=True)
+        freqs_eval = np.hstack((freq_min, freqs_eval))
+
 
         # iterative compensation of passivity violations
         t = 0
         self.history_max_sigma = []
-        while t < self.max_iterations:
+        while (t < self.max_iterations) and (ZH_min < 0):
             logging.info('Passivity enforcement; Iteration {}'.format(t + 1))
 
             A_matrix = []
             b_vector = []
             sigma_max = 0
+
+            ZH_min, freq_min = self.find_ZH_min(freqs_eval.max()/2, A, B, C_t,
+                                                D, 0*E)
+            freqs_eval = np.hstack((freq_min, freqs_eval))
 
             # sweep through evaluation frequencies
             for i_eval, freq_eval in enumerate(freqs_eval):
@@ -1138,8 +1221,13 @@ class VectorFitting:
                 # products: transpose(A * B) = transpose(B) * transpose(A)
                 # hence, S = C * coeffs <===> transpose(S) = transpose(coeffs) *
                 # transpose(C)
-                coeffs = np.transpose(np.matmul(np.linalg.inv(
-                                      s_k * np.identity(dim_A) - A), B))
+                if is_hybrid:
+                    w2A2inv = np.linalg.inv((2*np.pi*freq_eval)**2 *
+                                np.identity(dim_A) + A@A)
+                    coeffs = np.transpose( -w2A2inv @ A@B )
+                else:
+                    coeffs = np.transpose(np.matmul(np.linalg.inv(
+                                          s_k * np.identity(dim_A) - A), B))
                 if i_eval == 0:
                     A_matrix = np.vstack([np.real(coeffs), np.imag(coeffs)])
                     b_vector = np.vstack([np.real(np.transpose(s_viol)),
@@ -1583,7 +1671,7 @@ class VectorFitting:
 
     @check_plotting
     def plot_z_mag(self, i: int, j: int, freqs: Any = None,
-                  ax: mplt.Axes = None) -> mplt.Axes:
+            ax: mplt.Axes = None, fscale: float = 1e9) -> mplt.Axes:
         """
         Plots the magnitude in ohms (linear scale) of the impedance matrix
         response :math:`Z_{i+1,j+1}` in the fit.
@@ -1615,15 +1703,16 @@ class VectorFitting:
             import matplotlib.pyplot as mplt
             ax = mplt.gca()
 
-        ax.plot(self.network.f, np.abs(self.network.z[:, i, j]), 'r-',
+        ax.plot(self.network.f/fscale, np.abs(self.network.z[:, i, j]), 'r-',
                 label='Samples')
-        ax.plot(freqs, np.abs(self.get_model_response(i, j, freqs)), 'k--',
+        ax.plot(freqs/fscale, np.abs(self.get_model_response(i, j, freqs)), 'k--',
                 label='Fit')
         return ax
 
     @check_plotting
     def plot_z_re(self, i : int, j: int, freqs: Any = None,
-                  ax: mplt.Axes = None) -> mplt.Axes:
+            ax: mplt.Axes = None, plot_residuals: bool = False,
+                  fscale: float = 1e9) -> mplt.Axes:
         """
         Plots the real part of the impedance matrix response :math:`Z_{i+1,j+1}`
         in the fit.
@@ -1658,10 +1747,16 @@ class VectorFitting:
         if ax is None:
             ax = mplt.gca()
 
-        ax.plot(self.network.f, np.real(self.network.z[:, i, j]), 'r--',
-                label='Samples')
-        ax.plot(freqs, np.real(self.get_model_response(i, j, freqs)), 'k-',
-                label='Fit')
+
+        # Plot the residuals of the computed and data values
+        if plot_residuals:
+            ax.plot(freqs/fscale, np.abs(np.real(self.network.z[:, i, j]) \
+                  - np.real(self.get_model_response(i, j, freqs))), 'k-')
+        else:
+            ax.plot(self.network.f/fscale, np.real(self.network.z[:, i, j]),
+                    'r--', label='Samples')
+            ax.plot(freqs/fscale, np.real(self.get_model_response(i, j, freqs)),
+                    'k-', label='Fit')
         # ax.set_xlabel('Frequency (Hz)')
         # ax.set_ylabel('Real Part')
         # ax.legend(loc='best')
@@ -1670,7 +1765,8 @@ class VectorFitting:
 
     @check_plotting
     def plot_z_im(self, i : int, j: int, freqs: Any = None,
-            ax: mplt.Axes = None) -> mplt.Axes:
+            ax: mplt.Axes = None, plot_residuals: bool = False,
+            fscale: float = 1e9) -> mplt.Axes:
         """
         Plots the imaginary part of the impedance matrix response
         :math:`Z_{i+1,j+1}` in the fit.
@@ -1705,10 +1801,15 @@ class VectorFitting:
         if ax is None:
             ax = mplt.gca()
 
-        ax.plot(self.network.f, np.imag(self.network.z[:, i, j]), 'r--',
-                label='Samples')
-        ax.plot(freqs, np.imag(self.get_model_response(i, j, freqs)), 'k-',
-                label='Fit')
+        # Plot the residuals of the fit and the data
+        if plot_residuals:
+            ax.plot(freqs/fscale, np.abs(np.imag(self.network.z[:, i, j]) \
+                    -np.imag(self.get_model_response(i, j, freqs))), 'k-')
+        else:
+            ax.plot(self.network.f/fscale, np.imag(self.network.z[:, i, j]),
+                    'r--', label='Samples')
+            ax.plot(freqs/fscale, np.imag(self.get_model_response(i, j, freqs)),
+                    'k-', label='Fit')
         # ax.set_xlabel('Frequency (Hz)')
         # ax.set_ylabel('Imaginary Part')
         # ax.legend(loc='best')
@@ -1762,12 +1863,13 @@ class VectorFitting:
         return ax
 
     @check_plotting
-    def plot_zH_eigenvalues(self, freqs: Any = None, ax: mplt.Axes = None,
-            fname: str = None, fsize : float = 20.0,
-            ylim : list = None, plot_min_only : bool = False) -> mplt.Axes:
+    def plot_zH_eigenvalues(self, freqs: Any = None,
+            ax: mplt.Axes = None, fname: str = None, fsize: float = 20.0,
+            ylim: list = None, plot_min_only: bool = False,
+            fscale: float = 1e9) -> mplt.Axes:
         """
         Plots the eigenvalues of the vector fitted Hermitian part of Z-matrix in
-        linear scale.
+        linear scale and the positions of the violation frequencies.
 
         Parameters
         ----------
@@ -1792,6 +1894,11 @@ class VectorFitting:
         # if freqs is None:
         #     freqs = np.linspace(np.amin(self.network.f),
         #             np.amax(self.network.f), 1000)
+        # Check that the violation frequencies exist
+        if hasattr(self, 'violation_bands'):
+            viol_bands = self.violation_bands
+        else:
+            viol_bands = self.passivity_test()
 
         if (ax is None) and (fname is not None):
             import matplotlib.pyplot as mplt
@@ -1806,6 +1913,17 @@ class VectorFitting:
         n_ports = np.shape(D)[0]
         evals   = np.zeros((n_ports, len(freqs)))
 
+        # Compute the values of ZH at each of the violation frequencies
+        # if np.any(viol_bands):
+        #     for wv in viol_bands:
+        #         Zv0  = self._get_s_from_ABCDE(wv[0], A, B, C, D, E)
+        #         Zv1  = self._get_s_from_ABCDE(wv[1], A, B, C, D, E)
+        #         ZvH0 = (Zv0.conj().T + Zv0) / 2
+        #         ZvH1 = (Zv1.conj().T + Zv1) / 2
+        #         ev0 = np.min(np.linalg.eigvalsh(np.real(ZvH0))) 
+        #         ev1 = np.min(np.linalg.eigvalsh(np.real(ZvH1)))
+        #         ax.plot(wv, [ev0, ev1], color='k', marker='*', ls='none')
+
         # calculate and save eigenvalues for each frequency
         for i in range(len(freqs)):
             Z           = self._get_s_from_ABCDE(freqs[i], A, B, C, D, E)
@@ -1815,21 +1933,21 @@ class VectorFitting:
 
         # plot the frequency response of each singular value
         if plot_min_only:
-            ax.plot(freqs, np.zeros(len(freqs)), 'k:')
+            ax.plot(freqs/fscale, np.zeros(len(freqs)), 'k:')
             # ax.plot(freqs, evals[0, :], label=r'$\lambda_{\mathrm{min}}$')
-            ax.plot(freqs, np.min(evals, axis=0), label=r'$\lambda_{\mathrm{min}}$')
+            ax.plot(freqs/fscale, np.min(evals, axis=0)) # , label=r'$\lambda_{\mathrm{min}}$')
         else:
             for n in range(n_ports):
-                ax.plot(freqs, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
-            ax.plot(freqs, np.zeros(len(freqs)), 'k:')
+                ax.plot(freqs/fscale, evals[n, :], label=r'$\lambda_{}$'.format(n + 1))
+            ax.plot(freqs/fscale, np.zeros(len(freqs)), 'k:')
 
         # Set the axes fontsizes
         for tick in ax.get_xticklabels():
             tick.set_fontsize(fsize)
         for tick in ax.get_yticklabels():
             tick.set_fontsize(fsize)
-        ax.set_xlabel('Frequency (Hz)', fontsize=fsize)
-        ax.set_ylabel('Magnitude', fontsize=fsize)
+        ax.set_xlabel('Frequency [GHz]', fontsize=fsize)
+        ax.set_ylabel(r'$\lambda\{Z_H(j\omega)\}$', fontsize=fsize)
 
         # Upper, lower, or both y-limits
         if ylim is not None:

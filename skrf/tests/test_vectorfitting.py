@@ -222,6 +222,8 @@ class VectorFittingTestCase(unittest.TestCase):
 
         fname1 = f'{tld}/nrm210802_McDermott_Qubit_loss1en5_Qubit1_zmatrix.tab'
         fname2 = f'{tld}/nrm211212_McDermott_loss1en5_Qubit1_real_imag.tab'
+        # fname2 = \
+        # f'{tld}/nrm210802_McDermott_Qubit_loss1en5_Qubit1_zmatrix_real_imag_220407.tab'
         fname = fname2 if use_real_imag else fname1
 
         # Read the frequencies and impedances in a single shot
@@ -239,6 +241,11 @@ class VectorFittingTestCase(unittest.TestCase):
         print(f'Reading impedance data from {fname} ...')
         Z = np.zeros([Nf, Nports, Nports], dtype=np.complex128)
 
+        # Plot the data from file
+        fig_re, ax_re = mplt.subplots(Nports, Nports, tight_layout=True)
+        fig_im, ax_im = mplt.subplots(Nports, Nports, tight_layout=True)
+        fig_mag, ax_mag = mplt.subplots(Nports, Nports, tight_layout=True)
+        fsize = 20
         for i in range(Nports):
             for j in range(Nports):
                 zidx = 2 * (i * Nports + j) + 1
@@ -252,28 +259,51 @@ class VectorFittingTestCase(unittest.TestCase):
                     Zmag = zdata[zidx]
                     Zph  = zdata[zidx + 1]
                     Z[:, i, j] = Zmag * np.exp(1j * Zph * np.pi / 180.)
+
+                ax_re[i, j].plot(freqs/1e9, Z[:, i, j].real)
+                ax_im[i, j].plot(freqs/1e9, Z[:, i, j].imag)
+                ax_mag[i, j].plot(freqs/1e9, np.abs(Z[:, i, j]))
+
+        fig_re.savefig('zdata_re_mcdermott.pdf', format='pdf')
+        fig_im.savefig('zdata_im_mcdermott.pdf', format='pdf')
+        fig_im.savefig('zdata_mag_mcdermott.pdf', format='pdf')
+        mplt.close('all')
     
         # Create a network object to pass to VectorFit
         print(f'Constructing network from impedance data ...')
         nw       = skrf.Network.from_z(Z, f=freqs)
-        vf       = skrf.vectorFitting.VectorFitting(nw)
+        vf       = skrf.vectorFitting.VectorFitting(nw, is_hybrid=True)
         vf.freqs = freqs
 
         # Check for the data scales on the input
-        Zmin = np.min([np.min(np.real(np.linalg.eigvals((Z[k, :, :] 
+        Zmin = np.array([np.min(np.real(np.linalg.eigvals((Z[k, :, :] 
                             + Z[k, :, :].T.conj()) / 2)))
             for k in range(freqs.size)])
-        print(f'Zmin: {Zmin}')
+        print(f'Zmin: {np.min(Zmin)}')
 
-        # # Plot the eigenvalues before vector fit
-        # fname = 'zH_data_mcdermott.pdf'
-        # print('Plotting eigenvalues of ZH ...')
-        # vf.plot_zH_eigenvalues(freqs=freqs, fname=fname)
+        # Plot the eigenvalues before vector fit
+        print('Plotting eigenvalues of ZH (data) ...')
+        fig, ax = mplt.subplots(1, 1, tight_layout=True)
+        ax.plot(freqs / 1e9, Zmin)
+        ax.plot(freqs / 1e9, np.zeros(freqs.size), 'k:')
+        ax.set_xscale('log')
+        ax.set_xlabel('Frequency [GHz]', fontsize=fsize)
+        ax.set_ylabel(r'min $\lambda\{Z_H(j\omega)\}$',
+                      fontsize=fsize)
+        # Set the axes fontsizes
+        for tick in ax.get_xticklabels():
+            tick.set_fontsize(fsize)
+        for tick in ax.get_yticklabels():
+            tick.set_fontsize(fsize)
+        # ax.set_ylim([1.01 * np.min(Zfitpassmin), 0.1])
+        fig.savefig('zH_data_passive_check.pdf')
+        mplt.close('all')
 
         print(f'Performing Vector Fit on the network ...')
         # vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=False,
         #               fit_constant=True)
-        vf.vector_fit(n_poles_real=2, n_poles_cmplx=5, fit_proportional=True,
+        Nc = 5
+        vf.vector_fit(n_poles_real=2, n_poles_cmplx=Nc, fit_proportional=True,
                       fit_constant=True, parameter_type='z')
         # vf.vector_fit(n_poles_real=0, n_poles_cmplx=20, fit_proportional=True,
         #               fit_constant=True, parameter_type='z')
@@ -286,12 +316,6 @@ class VectorFittingTestCase(unittest.TestCase):
         skrf.write_to_hdf([freqs, A, B, C, D, E],
                           ['f', 'A', 'B', 'C', 'D', 'E'],
                           fname)
-        Zfit = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E)
-                         for f in freqs])
-        Zfitmin = np.min([np.min(np.real(np.linalg.eigvals((Zfit[k, :, :] 
-                            + Zfit[k, :, :].T.conj()) / 2)))
-                            for k in range(freqs.size)])
-        print(f'Zfitmin: {Zfitmin}')
 
         # Check for asymptotic passivity, and refit without negative eigenvalues
         # in the D-matrix
@@ -320,11 +344,34 @@ class VectorFittingTestCase(unittest.TestCase):
             Z_asym  = np.array([vf._get_s_from_ABCDE(ff, A, B, C, D_asym,
                                 E_asym) for ff in freqs])
             nw_asym = skrf.Network.from_z(Z_asym, f=freqs)
-            vf = skrf.vectorFitting.VectorFitting(nw_asym)
+            vf = skrf.vectorFitting.VectorFitting(nw_asym, is_hybrid=True)
 
-            vf.vector_fit(n_poles_real=2, n_poles_cmplx=5,
+            vf.vector_fit(n_poles_real=2, n_poles_cmplx=Nc,
                     fit_proportional=False,
                       fit_constant=True, parameter_type='z')
+
+        # Write out the asymptotically passive ABCD matrices
+        fname = 'mcdermott_vf_asymptotic_220405.hdf5'
+        A, B, C, D, E = vf._get_ABCDE()
+        skrf.write_to_hdf([freqs, A, B, C, D, E],
+                          ['f', 'A', 'B', 'C', 'D', 'E'],
+                          fname)
+
+        # Compute the eigenvalues on a denser grid
+        w0 = 8.86688e9
+        freqs_log = np.sort(np.concatenate((
+            np.logspace(np.log10(np.max([w0,1e-3]))-3,
+            np.log10(np.max([w0,1e-3]))+3,1000),
+            np.linspace(np .max([w0,1e-3])*.8,
+            np.max([w0,1e-3])*1.2,100000))))
+
+        # Fit the data on the denser frequency grid
+        Zfit = np.array([vf._get_s_from_ABCDE(f, A, B, C, D, E)
+                         for f in freqs_log])
+        Zfitmin = np.array([np.min(np.real(np.linalg.eigvals((Zfit[k, :, :] 
+                            + Zfit[k, :, :].T.conj()) / 2)))
+                            for k in range(freqs_log.size)])
+        print(f'Zfitmin: {Zfitmin}')
 
         # Check the poles and residues here
         poles_fit    = np.copy(vf.poles)
@@ -336,6 +383,25 @@ class VectorFittingTestCase(unittest.TestCase):
         vf.plot_zH_eigenvalues(freqs=freqs, fname=fname)
         fname = 'zH_min_vf_mcdermott.pdf'
         vf.plot_zH_eigenvalues(freqs=freqs, fname=fname, plot_min_only=True)
+
+        # Plot the eigenvalues before vector fit
+        print('Plotting eigenvalues of ZH (data) ...')
+        fig, ax = mplt.subplots(1, 1, tight_layout=True)
+        ax.plot(freqs_log / 1e9, Zfitmin)
+        ax.plot(freqs_log / 1e9, np.zeros(freqs_log.size), 'k:')
+        ax.set_xscale('log')
+        ax.set_xlabel('Frequency [GHz]', fontsize=fsize)
+        ax.set_ylabel(r'min $\lambda\{Z_H(j\omega)\}$',
+                      fontsize=fsize)
+        ax.set_ylim([-15, 10])
+        # Set the axes fontsizes
+        for tick in ax.get_xticklabels():
+            tick.set_fontsize(fsize)
+        for tick in ax.get_yticklabels():
+            tick.set_fontsize(fsize)
+        # ax.set_ylim([1.01 * np.min(Zfitpassmin), 0.1])
+        fig.savefig('zH_vf_passive_check.pdf')
+        mplt.close('all')
 
         # plot the real, imaginary components of the impedance
         # real part
@@ -351,11 +417,20 @@ class VectorFittingTestCase(unittest.TestCase):
                 vf.plot_z_mag(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_mag_mcdermott.pdf', format='pdf')
         mplt.close('all')
+
+        # Real part
         fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
         for i in range(Nports):
             for j in range(Nports):
                 vf.plot_z_re(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_re_mcdermott.pdf', format='pdf')
+        mplt.close('all')
+        fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
+        for i in range(Nports):
+            for j in range(Nports):
+                vf.plot_z_re(i, j, freqs=freqs, ax=ax[i, j],
+                        plot_residuals=True)
+        fig.savefig('zmatrix_re_residuals_mcdermott.pdf', format='pdf')
         mplt.close('all')
 
         # imaginary part
@@ -364,6 +439,13 @@ class VectorFittingTestCase(unittest.TestCase):
             for j in range(Nports):
                 vf.plot_z_im(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_im_mcdermott.pdf', format='pdf')
+        mplt.close('all')
+        fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
+        for i in range(Nports):
+            for j in range(Nports):
+                vf.plot_z_im(i, j, freqs=freqs, ax=ax[i, j],
+                        plot_residuals=True)
+        fig.savefig('zmatrix_im_residuals_mcdermott.pdf', format='pdf')
         mplt.close('all')
 
         # test if model is not passive
@@ -377,10 +459,10 @@ class VectorFittingTestCase(unittest.TestCase):
 
         # enforce passivity with default settings
         print('Applying passivity correction to Z ...')
-        # vf.max_iterations = 100
-        vf.max_iterations = 20
+        vf.max_iterations = 100
+        # vf.max_iterations = 20
         # vf.passivity_enforce(parameter_type='Z', n_samples=10*freqs.size) # freqs.size)
-        vf.passivity_enforce(parameter_type='Z', n_samples=2*freqs.size,
+        vf.passivity_enforce(parameter_type='Z', n_samples=1001,
                             delta_in=1e-2) # freqs.size)
 
         # write the passive ABCDE matrices to file
@@ -414,12 +496,6 @@ class VectorFittingTestCase(unittest.TestCase):
 
         # get the updated Z matrix and the mininum eigenvalues
         print('Computing the eigenvalues of ZH ...')
-        w0 = 8.86688e9
-        freqs_log = np.sort(np.concatenate((
-            np.logspace(np.log10(np.max([w0,1e-3]))-3,
-            np.log10(np.max([w0,1e-3]))+3,1000),
-            np.linspace(np .max([w0,1e-3])*.8,
-            np.max([w0,1e-3])*1.2,100000))))
         # freqs_log = np.logspace(7, 13, 100001)
         Zfitpass = np.array([vf._get_s_from_ABCDE(f, A1, B1, C1, D1, E1) 
                             for f in freqs_log])
@@ -433,13 +509,22 @@ class VectorFittingTestCase(unittest.TestCase):
         # print(f'Zfitpassmin(f={Zfitpassminfreq}): {Zfitpassmin}')
 
         print('Plotting the eigenvalues of ZH ...')
+        fsize = 20
         fig, ax = mplt.subplots(1, 1, tight_layout=True)
-        ax.plot(freqs_log, Zfitpassmin)
-        ax.plot(freqs_log, np.zeros(freqs_log.size), 'k--')
+        ax.plot(freqs_log / 1e9, Zfitpassmin)
+        ax.plot(freqs_log / 1e9, np.zeros(freqs_log.size), 'k:')
         ax.set_xscale('log')
-        ax.set_xlabel('Frequency [Hz]')
-        ax.set_ylabel(r'Re $\{\lambda\{Z_H(j\omega)\}\}$')
-        ax.set_ylim([-30, 30])
+        ax.set_xlabel('Frequency [GHz]', fontsize=fsize)
+        ax.set_ylabel(r'min $\lambda\{Z_H(j\omega)\}$',
+                      fontsize=fsize)
+        # ax.set_ylim([-0.01, 10])
+        ax.set_yscale('log')
+        # Set the axes fontsizes
+        for tick in ax.get_xticklabels():
+            tick.set_fontsize(fsize)
+        for tick in ax.get_yticklabels():
+            tick.set_fontsize(fsize)
+        # ax.set_ylim([1.01 * np.min(Zfitpassmin), 0.1])
         fig.savefig('zH_min_passive_check.pdf')
         mplt.close('all')
 
@@ -460,12 +545,27 @@ class VectorFittingTestCase(unittest.TestCase):
             for j in range(Nports):
                 vf.plot_z_re(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_passive_re_mcdermott.pdf', format='pdf')
+        fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
+        for i in range(Nports):
+            for j in range(Nports):
+                vf.plot_z_re(i, j, freqs=freqs, ax=ax[i, j],
+                        plot_residuals=True)
+        fig.savefig('zmatrix_passive_re_residuals_mcdermott.pdf', format='pdf')
         mplt.close('all')
+
+        # imag part
         fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
         for i in range(Nports):
             for j in range(Nports):
                 vf.plot_z_im(i, j, freqs=freqs, ax=ax[i, j])
         fig.savefig('zmatrix_passive_im_mcdermott.pdf', format='pdf')
+        mplt.close('all')
+        fig, ax = mplt.subplots(Nports, Nports, tight_layout=True)
+        for i in range(Nports):
+            for j in range(Nports):
+                vf.plot_z_im(i, j, freqs=freqs, ax=ax[i, j],
+                        plot_residuals=True)
+        fig.savefig('zmatrix_passive_im_residuals_mcdermott.pdf', format='pdf')
         mplt.close('all')
 
         # plot the passivity vs. iteration
