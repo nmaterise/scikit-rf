@@ -176,7 +176,6 @@ from numpy.linalg import inv as npy_inv
 from numpy import fft, gradient, ndarray, reshape, shape, ones, std
 from scipy import stats, signal  # for Network.add_noise_*, and Network.windowed
 from scipy.interpolate import interp1d  # for Network.interpolate()
-from scipy.ndimage.filters import convolve1d
 import unittest  # fotr unitest.skip
 
 from . import mathFunctions as mf
@@ -347,7 +346,7 @@ class Network(object):
 
     # CONSTRUCTOR
     def __init__(self, file: str = None, name: str = None, params: dict = None,
-                 comments: str = None, f_unit: str = None, 
+                 comments: str = None, f_unit: str = None,
                  s_def: str = S_DEF_DEFAULT, **kwargs) -> None:
         r"""
         Network constructor.
@@ -361,13 +360,13 @@ class Network(object):
 
         file : str or file-object
             file to load information from. supported formats are:
-             * touchstone file (.s?p) (or .ts)  
+             * touchstone file (.s?p) (or .ts)
              * io.StringIO object (with `.name` property which contains the file extension, such as `myfile.s4p`)
              * pickled Network (.ntwk, .p) see :func:`write`
         name : str, optional
             Name of this Network. if None will try to use file, if it is a str
         params : dict, optional
-            Dictionnary of parameters associated with the Network            
+            Dictionnary of parameters associated with the Network
         comments : str, optional
             Comments associated with the Network
         s_def : str -> s_def :  can be: 'power', 'pseudo' or 'traveling'
@@ -400,9 +399,9 @@ class Network(object):
         Directly from values
 
         >>> n = rf.Network(f=[1,2,3], s=[1,2,3], z0=[1,2,3])
-        
+
         Define some parameters associated with the Network
-        
+
         >>> n = rf.Network('ntwk1.s2p', params={'temperature': 25, 'voltage':5})
 
         See Also
@@ -422,7 +421,7 @@ class Network(object):
         self.comments = comments
         self.port_names = None
         self.encoding = kwargs.pop('encoding', None)
-                
+
         self.deembed = None
         self.noise = None
         self.noise_freq = None
@@ -1874,8 +1873,8 @@ class Network(object):
         Example
         -------
 
-        The following example shows how to use the :func:`drop_non_monotonic_increasing` 
-        automatically, if invalid frequency data is detected and an 
+        The following example shows how to use the :func:`drop_non_monotonic_increasing`
+        automatically, if invalid frequency data is detected and an
         :class:`~skrf.frequency.InvalidFrequencyWarning` is thrown.
 
 
@@ -1942,8 +1941,8 @@ class Network(object):
         filename : str or file-object
             touchstone file name.
         encoding : str, optional
-            define the file encoding to use. Default value is None, 
-            meaning the encoding is guessed.            
+            define the file encoding to use. Default value is None,
+            meaning the encoding is guessed.
 
         Note
         ----
@@ -2425,7 +2424,7 @@ class Network(object):
 
         The input 'freq_or_n` can be either a new
         :class:`~skrf.frequency.Frequency` or an `int`, or a new
-        frequency vector (in hz).
+        frequency vector (in Hz).
 
         This interpolates  a given `basis`, ie s, z, y, etc, in the
         coordinate system defined by `coord` like polar or cartesian.
@@ -2575,68 +2574,35 @@ class Network(object):
               result.noise_freq = new_frequency
         return result
 
-    def interpolate_self_npoints(self, npoints: int, **kwargs) -> None:
-        """
-
-        Interpolate network based on a new number of frequency points
-
-
-        Note
-        ----
-        The function :func:`~Network.resample` is an alias for
-        :func:`~Network.interpolate_self_npoints`.
-
-        Parameters
-        ----------
-        npoints : int
-                number of frequency points
-        **kwargs : keyword arguments
-                passed to :func:`scipy.interpolate.interp1d` initializer.
-
-        See Also
-        --------
-        interpolate_self : same functionality but takes a Frequency
-                object
-        interpolate : same functionality but takes a Frequency
-                object and returns a new Network, instead of updating
-                itself.
-
-
-        Examples
-        --------
-        .. ipython::
-
-            @suppress
-            In [21]: import skrf as rf
-
-            In [21]: n = rf.data.ring_slot
-
-            In [21]: n
-
-            In [21]: n.resample(501) # resample is an alias
-
-            In [21]: n
-
-        """
-        warnings.warn('Use interpolate_self', DeprecationWarning)
-        new_frequency = self.frequency.copy()
-        new_frequency.npoints = npoints
-        self.interpolate_self(new_frequency, **kwargs)
-
     def interpolate_self(self, freq_or_n: Union[Frequency, NumberLike], **kwargs) -> None:
         """
-        Interpolates s-parameters given a new
+        Interpolate the current Network along frequency axis (inplace).
 
-        :class:'~skrf.frequency.Frequency' object.
+        The input 'freq_or_n` can be either a new
+        :class:`~skrf.frequency.Frequency` or an `int`, or a new
+        frequency vector (in Hz).
 
         See :func:`~Network.interpolate` for more information.
 
         Parameters
         ----------
-        new_frequency : :class:`~skrf.frequency.Frequency`
-                frequency information to interpolate at
+        freq_or_n : :class:`~skrf.frequency.Frequency` or int or list-like
+            The new frequency over which to interpolate. this arg may be
+            one of the following:
+
+            * a new :class:`~skrf.frequency.Frequency` object
+
+            * an int: the current frequency span is resampled linearly.
+
+            * a list-like: create a new frequency using :meth:`~skrf.frequency.Frequency.from_f`
+
         **kwargs : keyword arguments
                 passed to :func:`scipy.interpolate.interp1d` initializer.
+
+        Returns
+        -------
+        None
+            The interpolation is performed inplace.
 
         See Also
         --------
@@ -2652,48 +2618,8 @@ class Network(object):
     ##convenience
     resample = interpolate_self
 
-    def interpolate_from_f(self, f: Frequency, interp_kwargs: dict = {}, **kwargs) -> 'Network':
-        r"""
-        Interpolates s-parameters from a frequency vector.
-
-        Given a frequency vector, and optionally a `unit` (see \*\*kwargs)
-        , interpolate the networks s-parameters linearly in real and
-        imaginary components.
-
-        See :func:`~Network.interpolate` for more information.
-
-
-        Note
-        ----
-        This creates a new :class:`~skrf.frequency.Frequency`, object
-        using the method :func:`~skrf.frequency.Frequency.from_f`,
-        and then calls :func:`~Network.interpolate_self`.
-
-
-        Parameters
-        ----------
-        new_frequency : :class:`~skrf.frequency.Frequency`
-            frequency information to interpolate at
-        interp_kwargs :
-            dictionary of kwargs to be passed through to
-            :func:`scipy.interpolate.interpolate.interp1d`
-        \*\*kwargs :
-            passed to :func:`scipy.interpolate.interp1d` initializer.
-
-        See Also
-        --------
-        resample
-        interpolate
-        interpolate_self
-        """
-        warnings.warn('Use interpolate', DeprecationWarning)
-        return self.interpolate(freq_or_n=f, f_kwargs=kwargs,
-                                **interp_kwargs)
-        # freq = Frequency.from_f(f,**kwargs)
-        # self.interpolate_self(freq, **interp_kwargs)
-
-    def extrapolate_to_dc(self, points: int = None, dc_sparam: NumberLike = None, 
-                          kind: str = 'warn', coords: str = 'cart',
+    def extrapolate_to_dc(self, points: int = None, dc_sparam: NumberLike = None,
+                          kind: str = 'cubic', coords: str = 'cart',
                           **kwargs) -> 'Network':
         """
         Extrapolate S-parameters down to 0 Hz and interpolate to uniform spacing.
@@ -2713,8 +2639,7 @@ class Network(object):
         dc_sparam : class:`npy.ndarray` or None
             NxN S-parameters matrix at 0 Hz.
             If None S-parameters at 0 Hz are determined by linear extrapolation.
-        kind : str or int, default is 'rational'
-            Default value will be changed to 'cubic' in future version.
+        kind : str or int, default is 'cubic'
             Specifies the kind of interpolation as a string ('linear',
             'nearest', 'zero', 'slinear', 'quadratic, 'cubic') or
             as an integer specifying the order of the spline
@@ -2740,14 +2665,6 @@ class Network(object):
         impulse_response
         step_response
         """
-        if kind == 'warn':
-            warnings.warn("The default `kind` parameter will change "
-                          "from `rational` to `cubic` in future versions."
-                          "Use `kind='rational'` to keep the old default."
-                          "To silent this warning, explitly define `kind`.",
-                          category=DeprecationWarning, stacklevel=2)
-            kind = 'rational'
-        
         result = self.copy()
 
         if self.frequency.f[0] == 0:
@@ -3404,25 +3321,25 @@ class Network(object):
             return (forward - reverse)
 
     # generalized mixed mode transformations
-    # XXX: experimental implementation of gmm s parameters
-    # TODO: automated test cases
-    def se2gmm(self, p: int, z0_mm: npy.ndarray = None) -> None:
+    def se2gmm(self, p: int, z0_mm: npy.ndarray = None, s_def : str = S_DEF_DEFAULT) -> None:
         """
         Transform network from single ended parameters to generalized mixed mode parameters [#]_
 
-        .. warning::
-            This is not fully tested, and should be considered as experimental
-
         Parameters
         ----------
-
         p : int
             number of differential ports
         z0_mm : Numpy array
-            `f x n x n` matrix of mixed mode impedances, optional
-            if input is None, 2 * z_o Ohms differential and z_0 / 2 Ohms common mode 
-            reference impedance is used
-
+            `f x 2*p x 2*p` matrix of mixed mode impedances, optional.
+            If input is None, 2 * z0 Ohms differential and z0 / 2 Ohms common mode
+            reference impedance is used, where z0 is average of the differential
+            pair ports reference impedance.
+            Single-ended ports not converted to differential mode keep their z0.
+        s_def : str -> s_def :  can be: 'power', 'pseudo' or 'traveling'
+            Scattering parameter definition : 'power' for power-waves definition [#Kurokawa]_,
+            'pseudo' for pseudo-waves definition [#Marks]_.
+            All the definitions give the same result if z0 is real valued.
+            Default is 'power'.
 
         Note Odd Number of Ports
 
@@ -3452,87 +3369,135 @@ class Network(object):
         ----------
         .. [#] Ferrero and Pirola; Generalized Mixed-Mode S-Parameters; IEEE Transactions on
             Microwave Theory and Techniques; Vol. 54; No. 1; Jan 2006
+        .. [#Kurokawa] Kurokawa, Kaneyuki "Power waves and the scattering matrix", IEEE Transactions on Microwave Theory and Techniques, vol.13, iss.2, pp. 194–202, March 1965.
+        .. [#Marks] Marks, R. B. and Williams, D. F. "A general waveguide circuit theory", Journal of Research of National Institute of Standard and Technology, vol.97, iss.5, pp. 533–562, 1992.
 
         See Also
         --------
         gmm2se
 
         """
-        # XXX: assumes 'proper' order (first differential ports, then single ended ports)
+        if 2*p > self.nports or p < 0:
+            raise ValueError('Invalid number of differential ports')
+        # Assumes 'proper' order (first differential ports, then single ended ports)
         if z0_mm is None:
             z0_mm = self.z0.copy()
-            z0_mm[:, 0:p] *= 2  # differential mode impedance
-            z0_mm[:, p:2 * p] /= 2  # common mode impedance
-        Xi_tilde_11, Xi_tilde_12, Xi_tilde_21, Xi_tilde_22 = self._Xi_tilde(p, self.z0, z0_mm)
+            z0_avg = 0.5*(z0_mm[:, 0:2*p:2] + z0_mm[:, 1:2*p:2])
+            z0_mm[:, 0:p] = 2*z0_avg  # differential mode impedance
+            z0_mm[:, p:2 * p] = 0.5*z0_avg  # common mode impedance
+        else:
+            # Make sure shape is correct
+            # Only set mixed mode ports
+            _z0_mm = self.z0.copy()
+            shape = [self.z0.shape[0], 2 * p]
+            z0_p = npy.broadcast_to(z0_mm, shape)
+            _z0_mm[:,:2*p] = z0_p
+            z0_mm = _z0_mm
+        Xi_tilde_11, Xi_tilde_12, Xi_tilde_21, Xi_tilde_22 = self._Xi_tilde(p, self.z0, z0_mm, s_def)
         A = Xi_tilde_21 + npy.einsum('...ij,...jk->...ik', Xi_tilde_22, self.s)
         B = Xi_tilde_11 + npy.einsum('...ij,...jk->...ik', Xi_tilde_12, self.s)
         self.s = npy.transpose(npy.linalg.solve(npy.transpose(B, (0, 2, 1)).conj(), npy.transpose(A, (0, 2, 1)).conj()),
                                (0, 2, 1)).conj()  # (34)
         self.z0 = z0_mm
 
-    def gmm2se(self, p: int, z0_se: NumberLike = None) -> None:
+    def gmm2se(self, p: int, z0_se: NumberLike = None, s_def : str = S_DEF_DEFAULT) -> None:
         """
         Transform network from generalized mixed mode parameters [#]_ to single ended parameters
-
-        .. warning::
-            This is not fully tested, and should be considered as experimental
 
         Parameters
         ----------
 
         p : int
             number of differential ports
-        z0_mm: Numpy array
-            `f x n x n` matrix of single ended impedances, optional
+        z0_se: Numpy array
+            `f x 2*p x 2*p` matrix of single ended impedances, optional
             if input is None, extract the reference impedance from the differential network
+            calculated as 0.5 * (0.5 * z0_diff + 2 * z0_comm) for each differential port.
+            Single-ended ports not converted to differential mode keep their z0.
+        s_def : str -> s_def :  can be: 'power', 'pseudo' or 'traveling'
+            Scattering parameter definition : 'power' for power-waves definition [#Kurokawa]_,
+            'pseudo' for pseudo-waves definition [#Marks]_.
+            All the definitions give the same result if z0 is real valued.
+            Default is 'power'.
 
         References
         ----------
         .. [#] Ferrero and Pirola; Generalized Mixed-Mode S-Parameters; IEEE Transactions on
             Microwave Theory and Techniques; Vol. 54; No. 1; Jan 2006
+        .. [#Kurokawa] Kurokawa, Kaneyuki "Power waves and the scattering matrix", IEEE Transactions on Microwave Theory and Techniques, vol.13, iss.2, pp. 194–202, March 1965.
+        .. [#Marks] Marks, R. B. and Williams, D. F. "A general waveguide circuit theory", Journal of Research of National Institute of Standard and Technology, vol.97, iss.5, pp. 533–562, 1992.
 
         See Also
         --------
         se2gmm
 
         """
-        # TODO: testing of reverse transformation
-        # XXX: assumes 'proper' order (differential ports, single ended ports)
+        if 2*p > self.nports or p < 0:
+            raise ValueError('Invalid number of differential ports')
+        # Assumes 'proper' order (differential ports, single ended ports)
         if z0_se is None:
             z0_se = self.z0.copy()
-            z0_se[:, 0:p] /= 2  # differential mode impedance
-            z0_se[:, p:2 * p] *= 2  # common mode impedance
-        Xi_tilde_11, Xi_tilde_12, Xi_tilde_21, Xi_tilde_22 = self._Xi_tilde(p, z0_se, self.z0)
+            z0_avg = 0.5*(0.5*z0_se[:, 0:p] + 2*z0_se[:, p:2*p])
+            z0_se[:, 0:p] = z0_avg
+            z0_se[:, p:2 * p] = z0_avg
+        else:
+            # Make sure shape is correct
+            # Only set mixed mode ports
+            _z0_se = self.z0.copy()
+            shape = [self.z0.shape[0], 2 * p]
+            z0_p = npy.broadcast_to(z0_se, shape)
+            _z0_se[:,:2*p] = z0_p
+            z0_se = _z0_se
+        Xi_tilde_11, Xi_tilde_12, Xi_tilde_21, Xi_tilde_22 = self._Xi_tilde(p, z0_se, self.z0, s_def)
         A = Xi_tilde_22 - npy.einsum('...ij,...jk->...ik', self.s, Xi_tilde_12)
-        B = Xi_tilde_21 - npy.einsum('...ij,...jk->...ik', self.s, Xi_tilde_11)
+        # Note that B sign is incorrect in the paper. Inverted B here gives the
+        # correct result.
+        B = -Xi_tilde_21 + npy.einsum('...ij,...jk->...ik', self.s, Xi_tilde_11)
         self.s = npy.linalg.solve(A, B)  # (35)
         self.z0 = z0_se
 
     # generalized mixed mode supplement functions
     _T = npy.array([[1, 0, -1, 0], [0, 0.5, 0, -0.5], [0.5, 0, 0.5, 0], [0, 1, 0, 1]])  # (5)
 
-    def _m(self, z0: npy.ndarray) -> npy.ndarray:
-        scaling = npy.sqrt(z0.real) / (2 * npy.abs(z0))
-        Z = npy.ones((z0.shape[0], 2, 2), dtype=npy.complex128)
-        Z[:, 0, 1] = z0
-        Z[:, 1, 1] = -z0
-        return scaling[:, npy.newaxis, npy.newaxis] * Z
+    def _m(self, z0: npy.ndarray, s_def : str) -> npy.ndarray:
+        if s_def == 'pseudo':
+            scaling = npy.sqrt(z0.real) / (2 * npy.abs(z0))
+            Z = npy.ones((z0.shape[0], 2, 2), dtype=npy.complex128)
+            Z[:, 0, 1] = z0
+            Z[:, 1, 1] = -z0
+            return scaling[:, npy.newaxis, npy.newaxis] * Z
+        elif s_def == 'power':
+            scaling = 1 / (2 * npy.sqrt(z0.real))
+            Z = npy.ones((z0.shape[0], 2, 2), dtype=npy.complex128)
+            Z[:, 0, 1] = z0
+            Z[:, 1, 1] = -z0.conj()
+            return scaling[:, npy.newaxis, npy.newaxis] * Z
+        elif s_def == 'traveling':
+            Z = npy.ones((z0.shape[0], 2, 2), dtype=npy.complex128)
+            sqrtz0 = npy.sqrt(z0)
+            Z[:, 0, 0] = 1 / sqrtz0
+            Z[:, 0, 1] = sqrtz0
+            Z[:, 1, 0] = 1 / sqrtz0
+            Z[:, 1, 1] = -sqrtz0
+            return 0.5 * Z
+        else:
+            raise ValueError('Unknown s_def')
 
-    def _M(self, j: int, k: int, z0_se: npy.ndarray) -> npy.ndarray:  # (14)
+    def _M(self, j: int, k: int, z0_se: npy.ndarray, s_def : str) -> npy.ndarray:  # (14)
         M = npy.zeros((self.f.shape[0], 4, 4), dtype=npy.complex128)
-        M[:, :2, :2] = self._m(z0_se[:, j])
-        M[:, 2:, 2:] = self._m(z0_se[:, k])
+        M[:, :2, :2] = self._m(z0_se[:, j], s_def)
+        M[:, 2:, 2:] = self._m(z0_se[:, k], s_def)
         return M
 
-    def _M_circle(self, l: int, p: int, z0_mm: npy.ndarray) -> npy.ndarray:  # (12)
+    def _M_circle(self, l: int, p: int, z0_mm: npy.ndarray, s_def : str) -> npy.ndarray:  # (12)
         M = npy.zeros((self.f.shape[0], 4, 4), dtype=npy.complex128)
-        M[:, :2, :2] = self._m(z0_mm[:, l])  # differential mode impedance of port pair
-        M[:, 2:, 2:] = self._m(z0_mm[:, p + l])  # common mode impedance of port pair
+        M[:, :2, :2] = self._m(z0_mm[:, l], s_def)  # differential mode impedance of port pair
+        M[:, 2:, 2:] = self._m(z0_mm[:, p + l], s_def)  # common mode impedance of port pair
         return M
 
-    def _X(self, j: int, k: int , l: int, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray) -> npy.ndarray:  # (15)
-        return npy.einsum('...ij,...jk->...ik', self._M_circle(l, p, z0_mm).dot(self._T),
-                          npy.linalg.inv(self._M(j, k, z0_se)))  # matrix multiplication elementwise for each frequency
+    def _X(self, j: int, k: int , l: int, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray, s_def : str) -> npy.ndarray:  # (15)
+        return npy.einsum('...ij,...jk->...ik', self._M_circle(l, p, z0_mm, s_def).dot(self._T),
+                          npy.linalg.inv(self._M(j, k, z0_se, s_def)))  # matrix multiplication elementwise for each frequency
 
     def _P(self, p: int) -> npy.ndarray:  # (27) (28)
         n = self.nports
@@ -3548,9 +3513,9 @@ class Network(object):
             Pca[l, 4 * (l + 1) - 1 - 1] = True
             Pdb[l, 4 * (l + 1) - 2 - 1] = True
             Pcb[l, 4 * (l + 1) - 1] = True
-            if Pa.shape[0] != 0:
-                Pa[l, 4 * p + 2 * (l + 1) - 1 - 1] = True
-                Pb[l, 4 * p + 2 * (l + 1) - 1] = True
+        for l in npy.arange(n - 2 * p):
+            Pa[l, 4 * p + 2 * (l + 1) - 1 - 1] = True
+            Pb[l, 4 * p + 2 * (l + 1) - 1] = True
         return npy.concatenate((Pda, Pca, Pa, Pdb, Pcb, Pb))
 
     def _Q(self) -> npy.ndarray:  # (29) error corrected
@@ -3563,18 +3528,18 @@ class Network(object):
             Qb[l, 2 * (l + 1) - 1] = True
         return npy.concatenate((Qa, Qb))
 
-    def _Xi(self, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray) -> npy.ndarray:  # (24)
+    def _Xi(self, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray, s_def : str) -> npy.ndarray:  # (24)
         n = self.nports
         Xi = npy.ones(self.f.shape[0])[:, npy.newaxis, npy.newaxis] * npy.eye(2 * n, dtype=npy.complex128)
         for l in npy.arange(p):
-            Xi[:, 4 * l:4 * l + 4, 4 * l:4 * l + 4] = self._X(l * 2, l * 2 + 1, l, p, z0_se, z0_mm)
+            Xi[:, 4 * l:4 * l + 4, 4 * l:4 * l + 4] = self._X(l * 2, l * 2 + 1, l, p, z0_se, z0_mm, s_def)
         return Xi
 
-    def _Xi_tilde(self, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray) -> npy.ndarray:  # (31)
+    def _Xi_tilde(self, p: int, z0_se: npy.ndarray, z0_mm: npy.ndarray, s_def : str) -> npy.ndarray:  # (31)
         n = self.nports
         P = npy.ones(self.f.shape[0])[:, npy.newaxis, npy.newaxis] * self._P(p)
         QT = npy.ones(self.f.shape[0])[:, npy.newaxis, npy.newaxis] * self._Q().T
-        Xi = self._Xi(p, z0_se, z0_mm)
+        Xi = self._Xi(p, z0_se, z0_mm, s_def)
         Xi_tilde = npy.einsum('...ij,...jk->...ik', npy.einsum('...ij,...jk->...ik', P, Xi), QT)
         return Xi_tilde[:, :n, :n], Xi_tilde[:, :n, n:], Xi_tilde[:, n:, :n], Xi_tilde[:, n:, n:]
 
@@ -3609,7 +3574,7 @@ class Network(object):
                 If None value is determined automatically based on if the
                 frequency vector begins from 0.
         squeeze: bool
-                Squeeze impulse response to one dimension, 
+                Squeeze impulse response to one dimension,
                 if a oneport gets transformed.
                 Has no effect when transforming a multiport.
                 Default = True
@@ -3673,7 +3638,7 @@ class Network(object):
                 Number of zeros to add as padding for FFT.
                 Adding more zeros improves accuracy of peaks.
         squeeze: bool
-                Squeeze step response to one dimension, 
+                Squeeze step response to one dimension,
                 if a oneport gets transformed.
                 Has no effect when transforming a multiport.
                 Default = True
@@ -4722,6 +4687,9 @@ def subnetwork(ntwk: Network, ports: int, offby:int = 1) -> Network:
     subntwk = Network(frequency=ntwk.frequency, z0=ntwk.z0[:,ports], name=subntwk_name)
     # keep requested rows and columns of the s-matrix. ports can be not contiguous
     subntwk.s = ntwk.s[npy.ix_(npy.arange(ntwk.s.shape[0]), ports, ports)]
+    # keep port_names
+    if ntwk.port_names:
+        subntwk.port_names = [ntwk.port_names[idx] for idx in ports]
     return subntwk
 
 ## Building composit networks from sub-networks
@@ -5468,8 +5436,7 @@ def z2y(z: npy.ndarray) -> npy.ndarray:
     .. [#] http://en.wikipedia.org/wiki/impedance_parameters
     .. [#] http://en.wikipedia.org/wiki/Admittance_parameters
     """
-    return npy.array([npy.mat(z[f, :, :]) ** -1 for f in range(z.shape[0])])
-
+    return npy.linalg.inv(z)
 
 def z2t(z: npy.ndarray) -> NoReturn:
     """
@@ -5855,7 +5822,7 @@ def y2z(y: npy.ndarray) -> npy.ndarray:
     .. [#] http://en.wikipedia.org/wiki/Admittance_parameters
     .. [#] http://en.wikipedia.org/wiki/impedance_parameters
     """
-    return npy.array([npy.mat(y[f, :, :]) ** -1 for f in range(y.shape[0])])
+    return npy.linalg.inv(y)
 
 
 def y2t(y: npy.ndarray) -> NoReturn:
@@ -6306,12 +6273,12 @@ def renormalize_s(s: npy.ndarray, z_old: NumberLike, z_new: NumberLike,
      To use the pseudo-wave formulation, use s_def='pseudo'.
      However, results should be the same for real-valued characteristic impedances.
      See the [#Marks]_ and [#Anritsu]_ for more details.
-    
-    
+
+
     Note
     ----
     This just calls ::
-   
+
         z2s(s2z(s, z0=z_old), z0=z_new, s_def=s_def)
 
 
@@ -6705,13 +6672,9 @@ def s2s_active(s: npy.ndarray, a:npy.ndarray) -> npy.ndarray:
     .. [#] D. Williams, IEEE Microw. Mag. 14, 38 (2013).
 
     """
-    # TODO : vectorize the for loop
-    nfreqs, nports, nports = s.shape
-    s_act = npy.zeros((nfreqs, nports), dtype='complex')
-    s[ s == 0 ] = 1e-12  # solve numerical singularity
-
-    for fidx in range(s.shape[0]):
-        s_act[fidx] = npy.matmul(s[fidx], a) / a
+    a = npy.asarray(a, dtype=complex)
+    a[a == 0] = 1e-12  # solve numerical singularity
+    s_act = npy.einsum('fmi,i,m->fm', s, a, npy.reciprocal(a))
     return s_act  # shape : (n_freqs, n_ports)
 
 def s2z_active(s: npy.ndarray, z0: NumberLike, a: npy.ndarray) -> npy.ndarray:
@@ -6753,11 +6716,8 @@ def s2z_active(s: npy.ndarray, z0: NumberLike, a: npy.ndarray) -> npy.ndarray:
     # TODO : vectorize the for loop
     nfreqs, nports, nports = s.shape
     z0 = fix_z0_shape(z0, nfreqs, nports)
-    z_act = npy.zeros((nfreqs, nports), dtype='complex')
     s_act = s2s_active(s, a)
-
-    for fidx in range(s.shape[0]):
-        z_act[fidx] = z0[fidx] * (1 + s_act[fidx])/(1 - s_act[fidx])
+    z_act = npy.einsum('fp,fp,fp->fp', z0, 1 + s_act, npy.reciprocal(1 - s_act))
     return z_act
 
 def s2y_active(s: npy.ndarray, z0: NumberLike, a: npy.ndarray) -> npy.ndarray:
@@ -6797,11 +6757,8 @@ def s2y_active(s: npy.ndarray, z0: NumberLike, a: npy.ndarray) -> npy.ndarray:
     """
     nfreqs, nports, nports = s.shape
     z0 = fix_z0_shape(z0, nfreqs, nports)
-    y_act = npy.zeros((nfreqs, nports), dtype='complex')
     s_act = s2s_active(s, a)
-
-    for fidx in range(s.shape[0]):
-        y_act[fidx] = 1/z0[fidx] * (1 - s_act[fidx])/(1 + s_act[fidx])
+    y_act = npy.einsum('fp,fp,fp->fp', npy.reciprocal(z0), 1 - s_act, npy.reciprocal(1 + s_act))        
     return y_act
 
 def s2vswr_active(s: npy.ndarray, a: npy.ndarray) -> npy.ndarray:
@@ -6836,13 +6793,8 @@ def s2vswr_active(s: npy.ndarray, a: npy.ndarray) -> npy.ndarray:
         s2z_active : active Z-parameters
         s2y_active : active Y-parameters
     """
-    nfreqs, nports, nports = s.shape
-    vswr_act = npy.zeros((nfreqs, nports), dtype='complex')
     s_act = s2s_active(s, a)
-
-    for fidx in range(s.shape[0]):
-        vswr_act[fidx] = (1 + npy.abs(s_act[fidx]))/(1 - npy.abs(s_act[fidx]))
-
+    vswr_act = npy.einsum('fp,fp->fp', (1 + npy.abs(s_act)), npy.reciprocal(1 - npy.abs(s_act)))
     return vswr_act
 
 
